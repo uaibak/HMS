@@ -27,15 +27,15 @@ function App() {
       >
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="dashboard" element={<DashboardPage />} />
-        <Route path="users" element={<ProtectedRoute roles={["ADMIN"]}><UsersPage /></ProtectedRoute>} />
-        <Route path="patients" element={<PatientsPage />} />
-        <Route path="doctors" element={<DoctorsPage />} />
-        <Route path="appointments" element={<AppointmentsPage />} />
-        <Route path="pharmacy" element={<ProtectedRoute roles={["ADMIN", "PHARMACIST"]}><PharmacyPage /></ProtectedRoute>} />
-        <Route path="lab" element={<ProtectedRoute roles={["ADMIN", "LAB_TECHNICIAN", "DOCTOR"]}><LabPage /></ProtectedRoute>} />
-        <Route path="billing" element={<BillingPage />} />
-        <Route path="reports" element={<ReportsPage />} />
-        <Route path="settings" element={<ProtectedRoute roles={["ADMIN"]}><SettingsPage /></ProtectedRoute>} />
+        <Route path="users" element={<ProtectedRoute permission={{ module: 'users', action: 'view' }}><UsersPage /></ProtectedRoute>} />
+        <Route path="patients" element={<ProtectedRoute permission={{ module: 'patients', action: 'view' }}><PatientsPage /></ProtectedRoute>} />
+        <Route path="doctors" element={<ProtectedRoute permission={{ module: 'doctors', action: 'view' }}><DoctorsPage /></ProtectedRoute>} />
+        <Route path="appointments" element={<ProtectedRoute permission={{ module: 'appointments', action: 'view' }}><AppointmentsPage /></ProtectedRoute>} />
+        <Route path="pharmacy" element={<ProtectedRoute permission={{ module: 'pharmacy', action: 'view' }}><PharmacyPage /></ProtectedRoute>} />
+        <Route path="lab" element={<ProtectedRoute roles={["ADMIN", "LAB_TECHNICIAN", "DOCTOR", "RECEPTIONIST"]}><LabPage /></ProtectedRoute>} />
+        <Route path="billing" element={<ProtectedRoute permission={{ module: 'billing', action: 'view' }}><BillingPage /></ProtectedRoute>} />
+        <Route path="reports" element={<ProtectedRoute permission={{ module: 'reports', action: 'view' }}><ReportsPage /></ProtectedRoute>} />
+        <Route path="settings" element={<ProtectedRoute permission={{ module: 'settings', action: 'view' }}><SettingsPage /></ProtectedRoute>} />
       </Route>
     </Routes>
   );

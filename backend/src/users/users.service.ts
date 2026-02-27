@@ -23,7 +23,7 @@ export class UsersService {
         password: hashedPassword,
         roleId: role.id,
       },
-      include: { role: true },
+      include: { role: true, doctor: true },
     });
   }
 
@@ -33,7 +33,7 @@ export class UsersService {
       this.prisma.user.findMany({
         skip,
         take: limit,
-        include: { role: true },
+        include: { role: true, doctor: true },
         orderBy: { createdAt: 'desc' },
       }),
       this.prisma.user.count(),
@@ -43,11 +43,11 @@ export class UsersService {
   }
 
   findById(id: string) {
-    return this.prisma.user.findUnique({ where: { id }, include: { role: true } });
+    return this.prisma.user.findUnique({ where: { id }, include: { role: true, doctor: true } });
   }
 
   findByEmail(email: string) {
-    return this.prisma.user.findUnique({ where: { email }, include: { role: true } });
+    return this.prisma.user.findUnique({ where: { email }, include: { role: true, doctor: true } });
   }
 
   async update(id: string, dto: UpdateUserDto) {
@@ -72,7 +72,7 @@ export class UsersService {
     return this.prisma.user.update({
       where: { id },
       data: payload,
-      include: { role: true },
+      include: { role: true, doctor: true },
     });
   }
 

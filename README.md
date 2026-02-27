@@ -31,4 +31,6 @@ Backend URL: `http://localhost:3000/api`
 
 - `admin@hms.local / Admin@123`
 - `doctor@hms.local / Doctor@123`
+- `doctor2@hms.local / Doctor2@123`
 - `pharmacist@hms.local / Pharma@123`
+- `reception@hms.local / Reception@123`

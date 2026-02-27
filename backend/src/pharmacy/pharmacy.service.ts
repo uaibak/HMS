@@ -1,15 +1,26 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { Prisma, RoleName, TransactionType, InvoiceType, InvoiceStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicineDto } from './dto/create-medicine.dto';
 import { UpdateMedicineDto } from './dto/update-medicine.dto';
 import { CreatePharmacyTransactionDto } from './dto/create-pharmacy-transaction.dto';
+import { PrescribeMedicineDto } from './dto/prescribe-medicine.dto';
+
+type Actor = {
+  userId: string;
+  role: RoleName;
+};
 
 @Injectable()
 export class PharmacyService {
   constructor(private readonly prisma: PrismaService) {}
 
-  createMedicine(dto: CreateMedicineDto) {
-    return this.prisma.medicine.create({ data: dto });
+  async createMedicine(dto: CreateMedicineDto, actor?: Actor) {
+    const medicine = await this.prisma.medicine.create({ data: dto });
+    await this.prisma.auditLog.create({
+      data: { userId: actor?.userId, action: 'CREATE_MEDICINE', module: 'PHARMACY', entityId: medicine.id },
+    });
+    return medicine;
   }
 
   async findMedicines(page = 1, limit = 10) {
@@ -21,30 +32,156 @@ export class PharmacyService {
     return { data, total, page, limit };
   }
 
-  async updateMedicine(id: string, dto: UpdateMedicineDto) {
+  async updateMedicine(id: string, dto: UpdateMedicineDto, actor?: Actor) {
     const medicine = await this.prisma.medicine.findUnique({ where: { id } });
     if (!medicine) throw new NotFoundException('Medicine not found');
-    return this.prisma.medicine.update({ where: { id }, data: dto });
+    const updated = await this.prisma.medicine.update({ where: { id }, data: dto });
+    await this.prisma.auditLog.create({
+      data: {
+        userId: actor?.userId,
+        action: 'UPDATE_MEDICINE',
+        module: 'PHARMACY',
+        entityId: updated.id,
+        details: dto as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return updated;
   }
 
-  removeMedicine(id: string) {
-    return this.prisma.medicine.delete({ where: { id } });
+  async removeMedicine(id: string, actor?: Actor) {
+    const deleted = await this.prisma.medicine.delete({ where: { id } });
+    await this.prisma.auditLog.create({
+      data: { userId: actor?.userId, action: 'DELETE_MEDICINE', module: 'PHARMACY', entityId: deleted.id },
+    });
+    return deleted;
   }
 
-  async createTransaction(dto: CreatePharmacyTransactionDto) {
+  async createTransaction(dto: CreatePharmacyTransactionDto, actor?: Actor) {
     const medicine = await this.prisma.medicine.findUnique({ where: { id: dto.medicineId } });
     if (!medicine) throw new NotFoundException('Medicine not found');
 
     // Stock increases on purchase and decreases on sale.
     const stockDelta = dto.type === 'PURCHASE' ? dto.quantity : -dto.quantity;
 
-    return this.prisma.$transaction([
+    const [transaction] = await this.prisma.$transaction([
       this.prisma.pharmacyTransaction.create({ data: dto }),
       this.prisma.medicine.update({
         where: { id: dto.medicineId },
         data: { stock: medicine.stock + stockDelta },
       }),
     ]);
+
+    if (dto.type === TransactionType.SALE && dto.patientId) {
+      await this.createPharmacyInvoiceIfMissing(transaction.id, dto.patientId, dto.amount, medicine.name);
+    }
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: actor?.userId,
+        action: 'CREATE_TRANSACTION',
+        module: 'PHARMACY',
+        entityId: transaction.id,
+        details: { type: dto.type, quantity: dto.quantity },
+      },
+    });
+    return transaction;
+  }
+
+  async prescribeMedicine(dto: PrescribeMedicineDto, actor: Actor) {
+    if (actor.role !== RoleName.DOCTOR && actor.role !== RoleName.ADMIN) {
+      throw new ForbiddenException('Only doctors or admins can prescribe medicine');
+    }
+
+    const medicine = await this.prisma.medicine.findUnique({ where: { id: dto.medicineId } });
+    if (!medicine) throw new NotFoundException('Medicine not found');
+    if (medicine.stock < dto.quantity) {
+      throw new BadRequestException('Insufficient stock for this medicine');
+    }
+
+    const patient = await this.prisma.patient.findUnique({ where: { id: dto.patientId } });
+    if (!patient) throw new NotFoundException('Patient not found');
+
+    let doctorId: string | null = null;
+    if (actor.role === RoleName.DOCTOR) {
+      const doctor = await this.prisma.doctor.findUnique({ where: { userId: actor.userId } });
+      if (!doctor) throw new ForbiddenException('Doctor profile not found for this user');
+      doctorId = doctor.id;
+    }
+
+    const amount = Number((medicine.unitPrice * dto.quantity).toFixed(2));
+
+    const [transaction, , invoice] = await this.prisma.$transaction([
+      this.prisma.pharmacyTransaction.create({
+        data: {
+          medicineId: dto.medicineId,
+          patientId: dto.patientId,
+          type: TransactionType.SALE,
+          quantity: dto.quantity,
+          amount,
+        },
+      }),
+      this.prisma.medicine.update({
+        where: { id: dto.medicineId },
+        data: { stock: medicine.stock - dto.quantity },
+      }),
+      this.prisma.invoice.create({
+        data: {
+          patientId: dto.patientId,
+          doctorId,
+          type: InvoiceType.PHARMACY,
+          description: `Pharmacy prescription: ${medicine.name} x ${dto.quantity}${dto.notes ? ` | Notes: ${dto.notes}` : ''}`,
+          amount,
+          paidAmount: 0,
+          status: InvoiceStatus.UNPAID,
+        },
+      }),
+    ]);
+
+    await this.prisma.auditLog.create({
+      data: {
+        userId: actor.userId,
+        action: 'PRESCRIBE_MEDICINE',
+        module: 'PHARMACY',
+        entityId: transaction.id,
+        details: {
+          patientId: dto.patientId,
+          medicineId: dto.medicineId,
+          quantity: dto.quantity,
+          amount,
+          invoiceId: invoice.id,
+        },
+      },
+    });
+
+    return { transaction, invoice };
+  }
+
+  private async createPharmacyInvoiceIfMissing(
+    transactionId: string,
+    patientId: string,
+    amount: number,
+    medicineName: string,
+  ) {
+    const description = `Pharmacy sale (${medicineName}) for transaction ${transactionId}`;
+    const existing = await this.prisma.invoice.findFirst({
+      where: {
+        patientId,
+        type: InvoiceType.PHARMACY,
+        description,
+      },
+    });
+    if (existing) return existing;
+
+    return this.prisma.invoice.create({
+      data: {
+        patientId,
+        type: InvoiceType.PHARMACY,
+        description,
+        amount,
+        paidAmount: 0,
+        status: InvoiceStatus.UNPAID,
+      },
+    });
   }
 
   findTransactions(page = 1, limit = 10) {

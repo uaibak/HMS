@@ -34,6 +34,7 @@ export class AuthService {
       sub: user.id,
       email: user.email,
       role: user.role.name,
+      doctorId: user.doctor?.id ?? null,
       firstName: user.firstName,
       lastName: user.lastName,
     };
@@ -55,6 +56,7 @@ export class AuthService {
         firstName: user.firstName,
         lastName: user.lastName,
         role: user.role.name,
+        doctorId: user.doctor?.id ?? null,
       },
     };
   }

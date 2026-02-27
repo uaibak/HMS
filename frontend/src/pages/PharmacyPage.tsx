@@ -1,50 +1,218 @@
-import { Button, DatePicker, Form, Input, InputNumber, Modal, Table, Typography } from 'antd';
-import { useEffect, useState } from 'react';
-import { createMedicine, getMedicines } from '../services/api';
+import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Typography, message } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  createMedicine,
+  getMedicines,
+  getPatients,
+  getPharmacyTransactions,
+  prescribeMedicine,
+} from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { can } from '../utils/permissions';
+
+type MedicineRow = {
+  id: string;
+  name: string;
+  batchNo: string;
+  stock: number;
+  unitPrice: number;
+  expiryDate: string;
+};
 
 export function PharmacyPage() {
-  const [rows, setRows] = useState<any[]>([]);
-  const [open, setOpen] = useState(false);
-  const [form] = Form.useForm();
+  const { user } = useAuth();
+  const [medicines, setMedicines] = useState<MedicineRow[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]);
+  const [patients, setPatients] = useState<any[]>([]);
+
+  const [inventoryModalOpen, setInventoryModalOpen] = useState(false);
+  const [prescriptionModalOpen, setPrescriptionModalOpen] = useState(false);
+
+  const [inventoryForm] = Form.useForm();
+  const [prescriptionForm] = Form.useForm();
+
+  const canManageInventory = can(user?.role, 'pharmacy', 'create');
+  const canPrescribe = user?.role === 'DOCTOR' || user?.role === 'ADMIN';
+  const lowStock = medicines.filter((m) => m.stock < 20);
 
   async function load() {
-    const res = await getMedicines(1, 50);
-    setRows(res.data);
+    const [medsRes, txRes, patientsRes] = await Promise.all([
+      getMedicines(1, 100),
+      getPharmacyTransactions(1, 100),
+      getPatients({ page: 1, limit: 100 }),
+    ]);
+
+    setMedicines(medsRes.data);
+    setTransactions(txRes);
+    setPatients(patientsRes.data);
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
-  async function submit() {
-    const values = await form.validateFields();
-    await createMedicine({ ...values, expiryDate: values.expiryDate.format('YYYY-MM-DD') });
-    setOpen(false);
-    form.resetFields();
+  async function submitInventory() {
+    const values = await inventoryForm.validateFields();
+    await createMedicine({
+      ...values,
+      expiryDate: values.expiryDate.format('YYYY-MM-DD'),
+    });
+    message.success('Medicine added to inventory');
+    setInventoryModalOpen(false);
+    inventoryForm.resetFields();
     load();
   }
+
+  async function submitPrescription() {
+    const values = await prescriptionForm.validateFields();
+    const medicine = medicines.find((m) => m.id === values.medicineId);
+
+    if (!medicine) {
+      message.error('Selected medicine was not found');
+      return;
+    }
+
+    if (medicine.stock < values.quantity) {
+      message.error('Insufficient stock for selected quantity');
+      return;
+    }
+
+    await prescribeMedicine(values);
+    // Backend auto-creates PHARMACY invoice and sale transaction for patient.
+    message.success('Medicine suggested successfully. Invoice entry added for patient billing.');
+    setPrescriptionModalOpen(false);
+    prescriptionForm.resetFields();
+    load();
+  }
+
+  const selectedMedicineId = Form.useWatch('medicineId', prescriptionForm);
+  const selectedQuantity = Form.useWatch('quantity', prescriptionForm) || 0;
+  const selectedMedicine = medicines.find((m) => m.id === selectedMedicineId);
+
+  const estimatedTotal = useMemo(() => {
+    if (!selectedMedicine) return 0;
+    return Number((selectedMedicine.unitPrice * selectedQuantity).toFixed(2));
+  }, [selectedMedicine, selectedQuantity]);
 
   return (
     <div>
       <Typography.Title level={3}>Pharmacy</Typography.Title>
-      <Button type="primary" onClick={() => setOpen(true)} style={{ marginBottom: 12 }}>Add Medicine</Button>
-      <Table
-        rowKey="id"
-        dataSource={rows}
-        columns={[
-          { title: 'Name', dataIndex: 'name' },
-          { title: 'Batch', dataIndex: 'batchNo' },
-          { title: 'Expiry', dataIndex: 'expiryDate' },
-          { title: 'Stock', dataIndex: 'stock' },
-          { title: 'Unit Price', dataIndex: 'unitPrice' },
+
+      <Space style={{ marginBottom: 12 }}>
+        {canManageInventory ? (
+          <Button type="primary" onClick={() => setInventoryModalOpen(true)}>
+            Add Medicine
+          </Button>
+        ) : null}
+
+        {canPrescribe ? (
+          <Button onClick={() => setPrescriptionModalOpen(true)}>
+            Suggest Medicine To Patient
+          </Button>
+        ) : null}
+      </Space>
+
+      {lowStock.length ? (
+        <Alert
+          type="warning"
+          style={{ marginBottom: 12 }}
+          message={`Low stock alert: ${lowStock.length} medicine(s) below threshold.`}
+        />
+      ) : null}
+
+      <Tabs
+        items={[
+          {
+            key: 'inventory',
+            label: 'Inventory',
+            children: (
+              <Table
+                rowKey="id"
+                dataSource={medicines}
+                columns={[
+                  { title: 'Name', dataIndex: 'name' },
+                  { title: 'Batch', dataIndex: 'batchNo' },
+                  { title: 'Expiry', dataIndex: 'expiryDate' },
+                  { title: 'Stock', dataIndex: 'stock' },
+                  { title: 'Unit Price', dataIndex: 'unitPrice' },
+                ]}
+              />
+            ),
+          },
+          {
+            key: 'transactions',
+            label: 'Transactions',
+            children: (
+              <Table
+                rowKey="id"
+                dataSource={transactions}
+                columns={[
+                  { title: 'Medicine', render: (_, r) => r.medicine?.name },
+                  { title: 'Patient', render: (_, r) => (r.patient ? `${r.patient.firstName} ${r.patient.lastName}` : '-') },
+                  { title: 'Type', dataIndex: 'type' },
+                  { title: 'Qty', dataIndex: 'quantity' },
+                  { title: 'Amount', dataIndex: 'amount' },
+                  { title: 'Date', dataIndex: 'transactionDate' },
+                ]}
+              />
+            ),
+          },
         ]}
       />
-      <Modal open={open} title="Add Medicine" onCancel={() => setOpen(false)} onOk={submit}>
-        <Form form={form} layout="vertical">
+
+      <Modal
+        open={inventoryModalOpen && canManageInventory}
+        title="Add Medicine"
+        onCancel={() => setInventoryModalOpen(false)}
+        onOk={submitInventory}
+      >
+        <Form form={inventoryForm} layout="vertical">
           <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="genericName" label="Generic Name"><Input /></Form.Item>
           <Form.Item name="batchNo" label="Batch No" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="expiryDate" label="Expiry Date" rules={[{ required: true }]}><DatePicker style={{ width: '100%' }} /></Form.Item>
           <Form.Item name="stock" label="Stock" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>
           <Form.Item name="unitPrice" label="Unit Price" rules={[{ required: true }]}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        open={prescriptionModalOpen && canPrescribe}
+        title="Suggest Medicine To Patient"
+        onCancel={() => setPrescriptionModalOpen(false)}
+        onOk={submitPrescription}
+      >
+        <Form form={prescriptionForm} layout="vertical">
+          <Form.Item name="patientId" label="Patient" rules={[{ required: true, message: 'Please select patient' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="Search patient by name/CNIC"
+              options={patients.map((p) => ({ value: p.id, label: `${p.firstName} ${p.lastName} (${p.cnic})` }))}
+            />
+          </Form.Item>
+
+          <Form.Item name="medicineId" label="Medicine" rules={[{ required: true, message: 'Please select medicine' }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="Search medicine"
+              options={medicines.map((m) => ({
+                value: m.id,
+                label: `${m.name} | Stock: ${m.stock} | PKR ${m.unitPrice}`,
+              }))}
+            />
+          </Form.Item>
+
+          <Form.Item name="quantity" label="Quantity" rules={[{ required: true, message: 'Please enter quantity' }]}>
+            <InputNumber min={1} style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea rows={3} placeholder="Usage instructions, duration, etc." />
+          </Form.Item>
+
+          <Alert type="info" showIcon message={`Estimated total: PKR ${estimatedTotal}`} />
         </Form>
       </Modal>
     </div>

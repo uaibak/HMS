@@ -7,6 +7,7 @@ type User = {
   firstName: string;
   lastName: string;
   role: string;
+  doctorId?: string | null;
 };
 
 type AuthContextValue = {

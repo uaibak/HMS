@@ -17,6 +17,7 @@ async function main() {
   const adminRole = roles.find((r) => r.name === RoleName.ADMIN)!;
   const doctorRole = roles.find((r) => r.name === RoleName.DOCTOR)!;
   const pharmacistRole = roles.find((r) => r.name === RoleName.PHARMACIST)!;
+  const receptionistRole = roles.find((r) => r.name === RoleName.RECEPTIONIST)!;
 
   const admin = await prisma.user.upsert({
     where: { email: 'admin@hms.local' },
@@ -42,6 +43,18 @@ async function main() {
     },
   });
 
+  const doctorUser2 = await prisma.user.upsert({
+    where: { email: 'doctor2@hms.local' },
+    update: {},
+    create: {
+      firstName: 'Usman',
+      lastName: 'Iqbal',
+      email: 'doctor2@hms.local',
+      password: await bcrypt.hash('Doctor2@123', 10),
+      roleId: doctorRole.id,
+    },
+  });
+
   await prisma.user.upsert({
     where: { email: 'pharmacist@hms.local' },
     update: {},
@@ -51,6 +64,18 @@ async function main() {
       email: 'pharmacist@hms.local',
       password: await bcrypt.hash('Pharma@123', 10),
       roleId: pharmacistRole.id,
+    },
+  });
+
+  await prisma.user.upsert({
+    where: { email: 'reception@hms.local' },
+    update: {},
+    create: {
+      firstName: 'Mina',
+      lastName: 'Shah',
+      email: 'reception@hms.local',
+      password: await bcrypt.hash('Reception@123', 10),
+      roleId: receptionistRole.id,
     },
   });
 
@@ -70,6 +95,25 @@ async function main() {
       },
       phone: '+92-300-1111111',
       email: 'doctor@hms.local',
+    },
+  });
+
+  const doctor2 = await prisma.doctor.upsert({
+    where: { userId: doctorUser2.id },
+    update: {},
+    create: {
+      userId: doctorUser2.id,
+      firstName: 'Usman',
+      lastName: 'Iqbal',
+      specialization: 'Neurology',
+      availability: {
+        slots: [
+          { day: 'Tuesday', from: '11:00', to: '15:00' },
+          { day: 'Thursday', from: '09:30', to: '13:30' },
+        ],
+      },
+      phone: '+92-300-2222222',
+      email: 'doctor2@hms.local',
     },
   });
 
@@ -105,25 +149,50 @@ async function main() {
     },
   });
 
-  await prisma.appointment.createMany({
-    data: [
-      {
-        patientId: patient1.id,
-        doctorId: doctor.id,
-        appointmentDate: new Date(),
-        reason: 'Chest pain follow-up',
-        status: AppointmentStatus.BOOKED,
-      },
-      {
-        patientId: patient2.id,
-        doctorId: doctor.id,
-        appointmentDate: new Date(Date.now() + 86400000),
-        reason: 'Routine checkup',
-        status: AppointmentStatus.BOOKED,
-      },
-    ],
-    skipDuplicates: true,
+  const patient3 = await prisma.patient.upsert({
+    where: { cnic: '35202-5555555-3' },
+    update: {},
+    create: {
+      firstName: 'Hamza',
+      lastName: 'Naveed',
+      cnic: '35202-5555555-3',
+      dob: new Date('1991-09-11'),
+      bloodGroup: 'O+',
+      address: 'Johar Town Lahore',
+      phone: '+92-333-5555555',
+      email: 'hamza@example.com',
+      assignedDoctorId: doctor2.id,
+    },
   });
+
+  const existingAppointments = await prisma.appointment.count();
+  if (existingAppointments === 0) {
+    await prisma.appointment.createMany({
+      data: [
+        {
+          patientId: patient1.id,
+          doctorId: doctor.id,
+          appointmentDate: new Date(),
+          reason: 'Chest pain follow-up',
+          status: AppointmentStatus.BOOKED,
+        },
+        {
+          patientId: patient2.id,
+          doctorId: doctor.id,
+          appointmentDate: new Date(Date.now() + 86400000),
+          reason: 'Routine checkup',
+          status: AppointmentStatus.BOOKED,
+        },
+        {
+          patientId: patient3.id,
+          doctorId: doctor2.id,
+          appointmentDate: new Date(Date.now() + 2 * 86400000),
+          reason: 'Migraine assessment',
+          status: AppointmentStatus.BOOKED,
+        },
+      ],
+    });
+  }
 
   const cbc = await prisma.labTest.upsert({
     where: { id: 'cbc-test-id' },

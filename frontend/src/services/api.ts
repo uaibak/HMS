@@ -114,6 +114,16 @@ export async function createMedicine(payload: Record<string, unknown>) {
   return data;
 }
 
+export async function prescribeMedicine(payload: Record<string, unknown>) {
+  const { data } = await api.post('/pharmacy/prescriptions', payload);
+  return data;
+}
+
+export async function getPharmacyTransactions(page = 1, limit = 20) {
+  const { data } = await api.get('/pharmacy/transactions', { params: { page, limit } });
+  return data;
+}
+
 export async function getLabOrders(page = 1, limit = 10) {
   const { data } = await api.get('/lab/orders', { params: { page, limit } });
   return data;
@@ -124,8 +134,23 @@ export async function createLabOrder(payload: Record<string, unknown>) {
   return data;
 }
 
+export async function updateLabOrder(id: string, payload: Record<string, unknown>) {
+  const { data } = await api.patch(`/lab/orders/${id}`, payload);
+  return data;
+}
+
 export async function getLabTests(page = 1, limit = 10) {
   const { data } = await api.get('/lab/tests', { params: { page, limit } });
+  return data;
+}
+
+export async function createLabTest(payload: Record<string, unknown>) {
+  const { data } = await api.post('/lab/tests', payload);
+  return data;
+}
+
+export async function updateLabTest(id: string, payload: Record<string, unknown>) {
+  const { data } = await api.patch(`/lab/tests/${id}`, payload);
   return data;
 }
 

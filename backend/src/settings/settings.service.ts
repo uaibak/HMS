@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 
@@ -20,15 +21,22 @@ export class SettingsService {
           hospitalEmail: dto.hospitalEmail,
           hospitalPhone: dto.hospitalPhone,
           hospitalAddress: dto.hospitalAddress,
-          rolesConfig: dto.rolesConfig,
-          permissionsConfig: dto.permissionsConfig,
+          rolesConfig: dto.rolesConfig as Prisma.InputJsonValue,
+          permissionsConfig: dto.permissionsConfig as Prisma.InputJsonValue,
         },
       });
     }
 
     return this.prisma.setting.update({
       where: { id: existing.id },
-      data: dto,
+      data: {
+        hospitalName: dto.hospitalName,
+        hospitalEmail: dto.hospitalEmail,
+        hospitalPhone: dto.hospitalPhone,
+        hospitalAddress: dto.hospitalAddress,
+        rolesConfig: dto.rolesConfig as Prisma.InputJsonValue,
+        permissionsConfig: dto.permissionsConfig as Prisma.InputJsonValue,
+      },
     });
   }
 }

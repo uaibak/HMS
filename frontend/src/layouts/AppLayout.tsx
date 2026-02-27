@@ -1,26 +1,28 @@
 import { Layout, Menu, Typography, Button } from 'antd';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { can } from '../utils/permissions';
 
 const { Header, Sider, Content } = Layout;
 
 const items = [
-  { key: '/dashboard', label: 'Dashboard' },
-  { key: '/users', label: 'Users' },
-  { key: '/patients', label: 'Patients' },
-  { key: '/doctors', label: 'Doctors' },
-  { key: '/appointments', label: 'Appointments' },
-  { key: '/pharmacy', label: 'Pharmacy' },
-  { key: '/lab', label: 'Lab' },
-  { key: '/billing', label: 'Billing' },
-  { key: '/reports', label: 'Reports' },
-  { key: '/settings', label: 'Settings' },
+  { key: '/dashboard', label: 'Dashboard', isAllowed: (role?: string) => !!role },
+  { key: '/users', label: 'Users', isAllowed: (role?: string) => can(role, 'users', 'view') },
+  { key: '/patients', label: 'Patients', isAllowed: (role?: string) => can(role, 'patients', 'view') },
+  { key: '/doctors', label: 'Doctors', isAllowed: (role?: string) => can(role, 'doctors', 'view') },
+  { key: '/appointments', label: 'Appointments', isAllowed: (role?: string) => can(role, 'appointments', 'view') },
+  { key: '/pharmacy', label: 'Pharmacy', isAllowed: (role?: string) => can(role, 'pharmacy', 'view') },
+  { key: '/lab', label: 'Lab', isAllowed: (role?: string) => can(role, 'lab', 'view') || can(role, 'lab', 'create') },
+  { key: '/billing', label: 'Billing', isAllowed: (role?: string) => can(role, 'billing', 'view') },
+  { key: '/reports', label: 'Reports', isAllowed: (role?: string) => can(role, 'reports', 'view') },
+  { key: '/settings', label: 'Settings', isAllowed: (role?: string) => can(role, 'settings', 'view') },
 ];
 
 export function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const visibleItems = items.filter((item) => item.isAllowed(user?.role));
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -33,7 +35,8 @@ export function AppLayout() {
         <Menu
           mode="inline"
           selectedKeys={[location.pathname]}
-          items={items}
+          // Hide modules that are not allowed for the logged-in role.
+          items={visibleItems}
           onClick={(e) => navigate(e.key)}
         />
       </Sider>

@@ -1,15 +1,36 @@
-import { Button, DatePicker, Form, Input, Modal, Select, Space, Table, Typography } from 'antd';
-import { useEffect, useState } from 'react';
+import { Button, Card, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
-import { cancelAppointment, createAppointment, getAppointments, updateAppointment } from '../services/api';
+import { cancelAppointment, createAppointment, getAppointments, getDoctors, getPatients, updateAppointment } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { can } from '../utils/permissions';
+
+type PatientOption = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  cnic: string;
+  phone: string;
+  bloodGroup: string;
+};
 
 export function AppointmentsPage() {
+  const { user } = useAuth();
   const [rows, setRows] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const [patientOptions, setPatientOptions] = useState<PatientOption[]>([]);
+  const [doctorOptions, setDoctorOptions] = useState<any[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<PatientOption | null>(null);
   const [form] = Form.useForm();
+
+  const isDoctor = user?.role === 'DOCTOR';
+  const canSchedule = can(user?.role, 'appointments', 'create');
+  const canCancel = can(user?.role, 'appointments', 'cancel');
+  const canReschedule = can(user?.role, 'appointments', 'reschedule') || can(user?.role, 'appointments', 'update');
+  const canMarkCompleted = can(user?.role, 'appointments', 'reschedule') || can(user?.role, 'appointments', 'update');
 
   async function load(p = page) {
     const res = await getAppointments(p, 10);
@@ -18,50 +39,198 @@ export function AppointmentsPage() {
     setPage(p);
   }
 
-  useEffect(() => { load(1); }, []);
+  async function loadDoctors() {
+    if (isDoctor) {
+      return;
+    }
+    const res = await getDoctors(1, 100);
+    setDoctorOptions(res.data);
+  }
+
+  async function searchPatients(search = '') {
+    const res = await getPatients({ page: 1, limit: 50, search });
+    setPatientOptions(res.data);
+  }
+
+  useEffect(() => {
+    load(1);
+    searchPatients();
+    loadDoctors();
+  }, []);
+
+  function openCreateModal() {
+    setEditing(null);
+    setSelectedPatient(null);
+    setOpen(true);
+    form.resetFields();
+
+    // Doctors should never change ownership; keep doctor self-reference auto-filled.
+    if (isDoctor && user?.doctorId) {
+      form.setFieldsValue({ doctorId: user.doctorId });
+    }
+  }
+
+  function openEditModal(record: any) {
+    setEditing(record);
+    setOpen(true);
+
+    const patient = {
+      id: record.patient?.id,
+      firstName: record.patient?.firstName,
+      lastName: record.patient?.lastName,
+      cnic: record.patient?.cnic,
+      phone: record.patient?.phone,
+      bloodGroup: record.patient?.bloodGroup,
+    };
+    setSelectedPatient(patient);
+
+    form.setFieldsValue({
+      patientId: record.patient?.id,
+      doctorId: record.doctor?.id,
+      appointmentDate: dayjs(record.appointmentDate),
+      reason: record.reason,
+      status: record.status,
+    });
+  }
 
   async function submit() {
     const values = await form.validateFields();
-    const payload = { ...values, appointmentDate: values.appointmentDate.toISOString() };
-    if (editing) await updateAppointment(editing.id, payload);
-    else await createAppointment(payload);
+
+    if (editing) {
+      const payload = {
+        appointmentDate: values.appointmentDate.toISOString(),
+        reason: values.reason,
+        ...(isDoctor ? {} : { status: values.status }),
+      };
+      await updateAppointment(editing.id, payload);
+      message.success('Appointment updated');
+    } else {
+      const payload = {
+        patientId: values.patientId,
+        doctorId: isDoctor ? user?.doctorId : values.doctorId,
+        appointmentDate: values.appointmentDate.toISOString(),
+        reason: values.reason,
+      };
+      await createAppointment(payload);
+      message.success('Appointment created');
+    }
+
     setOpen(false);
     setEditing(null);
+    setSelectedPatient(null);
     form.resetFields();
     load(page);
   }
 
+  const columns = useMemo(
+    () => [
+      { title: 'Patient', render: (_: unknown, r: any) => `${r.patient?.firstName || ''} ${r.patient?.lastName || ''}` },
+      { title: 'Doctor', render: (_: unknown, r: any) => `${r.doctor?.firstName || ''} ${r.doctor?.lastName || ''}` },
+      { title: 'Date', render: (_: unknown, r: any) => dayjs(r.appointmentDate).format('YYYY-MM-DD HH:mm') },
+      { title: 'Status', dataIndex: 'status' },
+      {
+        title: 'Actions',
+        render: (_: unknown, r: any) => (
+          <Space>
+            {canReschedule && (!isDoctor || r.doctorId === user?.doctorId) ? (
+              <Button onClick={() => openEditModal(r)}>Reschedule</Button>
+            ) : null}
+            {canMarkCompleted && r.status !== 'COMPLETED' && (!isDoctor || r.doctorId === user?.doctorId) ? (
+              <Button
+                type="default"
+                onClick={async () => {
+                  await updateAppointment(r.id, { status: 'COMPLETED' });
+                  message.success('Appointment marked completed');
+                  load(page);
+                }}
+              >
+                Mark Completed
+              </Button>
+            ) : null}
+            {canCancel ? (
+              <Button danger onClick={async () => { await cancelAppointment(r.id); load(page); }}>
+                Cancel
+              </Button>
+            ) : null}
+          </Space>
+        ),
+      },
+    ],
+    [isDoctor, page],
+  );
+
   return (
     <div>
       <Typography.Title level={3}>Appointments</Typography.Title>
-      <Button type="primary" onClick={() => setOpen(true)} style={{ marginBottom: 12 }}>Schedule</Button>
-      <Table
-        rowKey="id"
-        dataSource={rows}
-        pagination={{ current: page, total, onChange: load }}
-        columns={[
-          { title: 'Patient', render: (_, r) => `${r.patient?.firstName || ''} ${r.patient?.lastName || ''}` },
-          { title: 'Doctor', render: (_, r) => `${r.doctor?.firstName || ''} ${r.doctor?.lastName || ''}` },
-          { title: 'Date', render: (_, r) => dayjs(r.appointmentDate).format('YYYY-MM-DD HH:mm') },
-          { title: 'Status', dataIndex: 'status' },
-          {
-            title: 'Actions',
-            render: (_, r) => (
-              <Space>
-                <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue({ ...r, appointmentDate: dayjs(r.appointmentDate) }); }}>Reschedule</Button>
-                <Button danger onClick={async () => { await cancelAppointment(r.id); load(page); }}>Cancel</Button>
-              </Space>
-            ),
-          },
-        ]}
-      />
-      <Modal open={open} title={editing ? 'Reschedule Appointment' : 'Book Appointment'} onCancel={() => setOpen(false)} onOk={submit}>
+      {canSchedule ? (
+        <Button type="primary" onClick={openCreateModal} style={{ marginBottom: 12 }}>
+          Schedule
+        </Button>
+      ) : null}
+      <Table rowKey="id" dataSource={rows} pagination={{ current: page, total, onChange: load }} columns={columns} />
+
+      <Modal
+        open={open}
+        title={editing ? 'Reschedule Appointment' : 'Book Appointment'}
+        onCancel={() => {
+          setOpen(false);
+          setEditing(null);
+          setSelectedPatient(null);
+        }}
+        onOk={submit}
+      >
         <Form form={form} layout="vertical">
-          <Form.Item name="patientId" label="Patient ID" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="doctorId" label="Doctor ID" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="appointmentDate" label="Appointment Date" rules={[{ required: true }]}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
-          <Form.Item name="reason" label="Reason"><Input /></Form.Item>
-          <Form.Item name="status" label="Status"><Select options={['BOOKED','COMPLETED','CANCELLED'].map((x)=>({label:x,value:x}))} /></Form.Item>
+          <Form.Item name="patientId" label="Patient" rules={[{ required: true, message: 'Please select a patient' }]}>
+            <Select
+              disabled={!!editing}
+              showSearch
+              placeholder="Search by patient name or CNIC"
+              filterOption={false}
+              onSearch={(value) => searchPatients(value)}
+              onChange={(id: string) => {
+                const patient = patientOptions.find((x) => x.id === id) || null;
+                // Auto-fill patient summary after selection for doctor referrals.
+                setSelectedPatient(patient);
+              }}
+              options={patientOptions.map((p) => ({ label: `${p.firstName} ${p.lastName} (${p.cnic})`, value: p.id }))}
+            />
+          </Form.Item>
+
+          {selectedPatient ? (
+            <Card size="small" style={{ marginBottom: 12 }}>
+              <Descriptions size="small" column={1}>
+                <Descriptions.Item label="Patient ID">{selectedPatient.id}</Descriptions.Item>
+                <Descriptions.Item label="Name">{selectedPatient.firstName} {selectedPatient.lastName}</Descriptions.Item>
+                <Descriptions.Item label="Phone">{selectedPatient.phone}</Descriptions.Item>
+                <Descriptions.Item label="Blood Group">{selectedPatient.bloodGroup}</Descriptions.Item>
+              </Descriptions>
+            </Card>
+          ) : null}
+
+          <Form.Item name="doctorId" label="Doctor" rules={[{ required: true, message: 'Please select a doctor' }]}>
+            <Select
+              disabled={isDoctor || !!editing}
+              options={
+                isDoctor
+                  ? [{ label: `${user?.firstName} ${user?.lastName} (Self)`, value: user?.doctorId }]
+                  : doctorOptions.map((d) => ({ label: `${d.firstName} ${d.lastName} - ${d.specialization}`, value: d.id }))
+              }
+            />
+          </Form.Item>
+
+          <Form.Item name="appointmentDate" label="Appointment Date" rules={[{ required: true, message: 'Please select appointment date/time' }]}>
+            <DatePicker showTime style={{ width: '100%' }} />
+          </Form.Item>
+
+          <Form.Item name="reason" label="Reason" rules={[{ required: true, message: 'Please enter reason' }]}>
+            <Input />
+          </Form.Item>
+
+          {!isDoctor && can(user?.role, 'appointments', 'update') ? (
+            <Form.Item name="status" label="Status">
+              <Select options={['BOOKED', 'COMPLETED', 'CANCELLED'].map((x) => ({ label: x, value: x }))} />
+            </Form.Item>
+          ) : null}
         </Form>
       </Modal>
     </div>

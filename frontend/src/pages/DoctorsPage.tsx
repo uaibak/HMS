@@ -1,14 +1,18 @@
 import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { createDoctor, deleteDoctor, getDoctors, updateDoctor } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import { can } from '../utils/permissions';
 
 export function DoctorsPage() {
+  const { user } = useAuth();
   const [rows, setRows] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [form] = Form.useForm();
+  const canManageDoctors = can(user?.role, 'doctors', 'create');
 
   async function load(p = page) {
     const res = await getDoctors(p, 10);
@@ -38,7 +42,7 @@ export function DoctorsPage() {
   return (
     <div>
       <Typography.Title level={3}>Doctor Management</Typography.Title>
-      <Button type="primary" onClick={() => setOpen(true)} style={{ marginBottom: 12 }}>Add Doctor</Button>
+      {canManageDoctors ? <Button type="primary" onClick={() => setOpen(true)} style={{ marginBottom: 12 }}>Add Doctor</Button> : null}
       <Table
         rowKey="id"
         dataSource={rows}
@@ -51,10 +55,12 @@ export function DoctorsPage() {
           {
             title: 'Actions',
             render: (_, r) => (
-              <Space>
-                <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue(r); }}>Edit</Button>
-                <Button danger onClick={async () => { await deleteDoctor(r.id); load(page); }}>Delete</Button>
-              </Space>
+              canManageDoctors ? (
+                <Space>
+                  <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue(r); }}>Edit</Button>
+                  <Button danger onClick={async () => { await deleteDoctor(r.id); load(page); }}>Delete</Button>
+                </Space>
+              ) : 'View Only'
             ),
           },
         ]}

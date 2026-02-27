@@ -15,7 +15,9 @@ Base URL: `http://localhost:3000/api`
 
 - Admin: `admin@hms.local` / `Admin@123`
 - Doctor: `doctor@hms.local` / `Doctor@123`
+- Doctor 2: `doctor2@hms.local` / `Doctor2@123`
 - Pharmacist: `pharmacist@hms.local` / `Pharma@123`
+- Receptionist: `reception@hms.local` / `Reception@123`
 
 ## Example Endpoints
 
@@ -23,6 +25,7 @@ Base URL: `http://localhost:3000/api`
 - `GET /api/users?page=1&limit=10`
 - `GET /api/patients?search=ali&page=1&limit=10`
 - `POST /api/appointments`
+- `PATCH /api/appointments/:id` (Doctor can reschedule only own appointments)
 - `POST /api/pharmacy/transactions`
 - `POST /api/lab/orders`
 - `POST /api/billing/invoices`

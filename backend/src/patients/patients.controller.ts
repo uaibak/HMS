@@ -7,15 +7,17 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { RoleName } from '@prisma/client';
-import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { Request } from 'express';
 import { Roles } from '../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { CreatePatientDto } from './dto/create-patient.dto';
+import { PatientQueryDto } from './dto/patient-query.dto';
 import { UpdatePatientDto } from './dto/update-patient.dto';
 import { PatientsService } from './patients.service';
 
@@ -26,13 +28,16 @@ export class PatientsController {
 
   @Post()
   @Roles(RoleName.ADMIN, RoleName.RECEPTIONIST)
-  create(@Body() dto: CreatePatientDto) {
-    return this.patientsService.create(dto);
+  create(
+    @Body() dto: CreatePatientDto,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.patientsService.create(dto, req.user);
   }
 
   @Get()
   @Roles(RoleName.ADMIN, RoleName.DOCTOR, RoleName.RECEPTIONIST)
-  findAll(@Query() query: PaginationQueryDto & { search?: string }) {
+  findAll(@Query() query: PatientQueryDto) {
     return this.patientsService.findAll(query.page, query.limit, query.search);
   }
 
@@ -43,14 +48,21 @@ export class PatientsController {
   }
 
   @Patch(':id')
-  @Roles(RoleName.ADMIN, RoleName.DOCTOR)
-  update(@Param('id') id: string, @Body() dto: UpdatePatientDto) {
-    return this.patientsService.update(id, dto);
+  @Roles(RoleName.ADMIN)
+  update(
+    @Param('id') id: string,
+    @Body() dto: UpdatePatientDto,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.patientsService.update(id, dto, req.user);
   }
 
   @Delete(':id')
   @Roles(RoleName.ADMIN)
-  remove(@Param('id') id: string) {
-    return this.patientsService.remove(id);
+  remove(
+    @Param('id') id: string,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.patientsService.remove(id, req.user);
   }
 }

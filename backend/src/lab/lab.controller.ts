@@ -1,6 +1,7 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { RoleName } from '@prisma/client';
 import { AuthGuard } from '@nestjs/passport';
+import { Request } from 'express';
 import { Roles } from '../common/decorators/roles.decorator';
 import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
@@ -23,7 +24,7 @@ export class LabController {
   }
 
   @Get('tests')
-  @Roles(RoleName.ADMIN, RoleName.LAB_TECHNICIAN, RoleName.DOCTOR)
+  @Roles(RoleName.ADMIN, RoleName.LAB_TECHNICIAN, RoleName.DOCTOR, RoleName.RECEPTIONIST)
   listTests(@Query() query: PaginationQueryDto) {
     return this.labService.listTests(query.page, query.limit);
   }
@@ -36,19 +37,29 @@ export class LabController {
 
   @Post('orders')
   @Roles(RoleName.ADMIN, RoleName.DOCTOR, RoleName.RECEPTIONIST)
-  createOrder(@Body() dto: CreateLabOrderDto) {
-    return this.labService.createOrder(dto);
+  createOrder(
+    @Body() dto: CreateLabOrderDto,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.labService.createOrder(dto, req.user);
   }
 
   @Get('orders')
-  @Roles(RoleName.ADMIN, RoleName.DOCTOR, RoleName.LAB_TECHNICIAN)
-  listOrders(@Query() query: PaginationQueryDto) {
-    return this.labService.listOrders(query.page, query.limit);
+  @Roles(RoleName.ADMIN, RoleName.DOCTOR, RoleName.LAB_TECHNICIAN, RoleName.RECEPTIONIST)
+  listOrders(
+    @Query() query: PaginationQueryDto,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.labService.listOrders(query.page, query.limit, req.user);
   }
 
   @Patch('orders/:id')
   @Roles(RoleName.ADMIN, RoleName.LAB_TECHNICIAN)
-  updateOrder(@Param('id') id: string, @Body() dto: UpdateLabOrderDto) {
-    return this.labService.updateOrder(id, dto);
+  updateOrder(
+    @Param('id') id: string,
+    @Body() dto: UpdateLabOrderDto,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.labService.updateOrder(id, dto, req.user);
   }
 }
