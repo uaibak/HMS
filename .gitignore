@@ -1,0 +1,45 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Node
+node_modules/
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Prisma
+backend/prisma/dev.db
+backend/prisma/dev.db-journal
+
+# Frontend
+frontend/.vite/
+
+# Backend
+backend/dist/
+
+# Frontend
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# Temp
+.tmp/
+tmp/

@@ -1,0 +1,211 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleName {
+  ADMIN
+  DOCTOR
+  PHARMACIST
+  LAB_TECHNICIAN
+  RECEPTIONIST
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CANCELLED
+  COMPLETED
+}
+
+enum SampleStatus {
+  PENDING
+  COLLECTED
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum TransactionType {
+  PURCHASE
+  SALE
+}
+
+enum InvoiceType {
+  OPD
+  IPD
+  LAB
+  PHARMACY
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+model Role {
+  id          String   @id @default(uuid())
+  name        RoleName @unique
+  description String?
+  users       User[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model User {
+  id        String     @id @default(uuid())
+  firstName String
+  lastName  String
+  email     String     @unique
+  password  String
+  isActive  Boolean    @default(true)
+  roleId    String
+  role      Role       @relation(fields: [roleId], references: [id])
+  doctor    Doctor?
+  labOrders LabOrder[] @relation("DoctorLabOrders")
+  auditLogs AuditLog[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model Doctor {
+  id             String        @id @default(uuid())
+  userId         String?       @unique
+  firstName      String
+  lastName       String
+  specialization String
+  availability   Json
+  phone          String
+  email          String
+  patients       Patient[]
+  appointments   Appointment[]
+  invoices       Invoice[]
+  user           User?         @relation(fields: [userId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Patient {
+  id                   String                @id @default(uuid())
+  firstName            String
+  lastName             String
+  cnic                 String                @unique
+  dob                  DateTime
+  bloodGroup           String
+  address              String
+  phone                String
+  email                String?
+  assignedDoctorId     String?
+  assignedDoctor       Doctor?               @relation(fields: [assignedDoctorId], references: [id])
+  appointments         Appointment[]
+  labOrders            LabOrder[]
+  invoices             Invoice[]
+  pharmacyTransactions PharmacyTransaction[]
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+}
+
+model Appointment {
+  id              String            @id @default(uuid())
+  patientId       String
+  doctorId        String
+  appointmentDate DateTime
+  reason          String?
+  visitNotes      String?
+  status          AppointmentStatus @default(BOOKED)
+  patient         Patient           @relation(fields: [patientId], references: [id])
+  doctor          Doctor            @relation(fields: [doctorId], references: [id])
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+}
+
+model Medicine {
+  id           String                @id @default(uuid())
+  name         String
+  genericName  String?
+  batchNo      String
+  expiryDate   DateTime
+  stock        Int
+  unitPrice    Float
+  transactions PharmacyTransaction[]
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+}
+
+model PharmacyTransaction {
+  id              String          @id @default(uuid())
+  medicineId      String
+  patientId       String?
+  type            TransactionType
+  quantity        Int
+  amount          Float
+  transactionDate DateTime        @default(now())
+  medicine        Medicine        @relation(fields: [medicineId], references: [id])
+  patient         Patient?        @relation(fields: [patientId], references: [id])
+}
+
+model LabTest {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  price       Float
+  orders      LabOrder[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model LabOrder {
+  id            String       @id @default(uuid())
+  patientId     String
+  testId        String
+  orderedById   String?
+  sampleStatus  SampleStatus @default(PENDING)
+  resultFileUrl String?
+  resultText    String?
+  orderedAt     DateTime     @default(now())
+  resultAt      DateTime?
+  patient       Patient      @relation(fields: [patientId], references: [id])
+  test          LabTest      @relation(fields: [testId], references: [id])
+  orderedBy     User?        @relation("DoctorLabOrders", fields: [orderedById], references: [id])
+}
+
+model Invoice {
+  id          String        @id @default(uuid())
+  patientId   String
+  doctorId    String?
+  type        InvoiceType
+  description String?
+  amount      Float
+  paidAmount  Float         @default(0)
+  status      InvoiceStatus @default(UNPAID)
+  dueDate     DateTime?
+  patient     Patient       @relation(fields: [patientId], references: [id])
+  doctor      Doctor?       @relation(fields: [doctorId], references: [id])
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model Setting {
+  id                String   @id @default(uuid())
+  hospitalName      String
+  hospitalEmail     String
+  hospitalPhone     String
+  hospitalAddress   String
+  rolesConfig       Json
+  permissionsConfig Json
+  updatedAt         DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  action    String
+  module    String
+  entityId  String?
+  details   Json?
+  user      User?    @relation(fields: [userId], references: [id])
+  createdAt DateTime @default(now())
+}
