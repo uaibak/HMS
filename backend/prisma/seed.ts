@@ -205,6 +205,28 @@ async function main() {
     },
   });
 
+  await prisma.labTest.upsert({
+    where: { id: 'lft-test-id' },
+    update: {},
+    create: {
+      id: 'lft-test-id',
+      name: 'LFT',
+      description: 'Liver Function Test',
+      price: 1500,
+    },
+  });
+
+  await prisma.labTest.upsert({
+    where: { id: 'lipid-test-id' },
+    update: {},
+    create: {
+      id: 'lipid-test-id',
+      name: 'Lipid Profile',
+      description: 'Cholesterol and triglycerides panel',
+      price: 1800,
+    },
+  });
+
   await prisma.labOrder.create({
     data: {
       patientId: patient1.id,
@@ -226,6 +248,34 @@ async function main() {
       expiryDate: new Date('2027-12-31'),
       stock: 150,
       unitPrice: 45,
+    },
+  });
+
+  await prisma.medicine.upsert({
+    where: { id: 'med-paracetamol' },
+    update: {},
+    create: {
+      id: 'med-paracetamol',
+      name: 'Paracetamol 500mg',
+      genericName: 'Acetaminophen',
+      batchNo: 'PCM-2026-03',
+      expiryDate: new Date('2028-01-31'),
+      stock: 300,
+      unitPrice: 12,
+    },
+  });
+
+  await prisma.medicine.upsert({
+    where: { id: 'med-omeprazole' },
+    update: {},
+    create: {
+      id: 'med-omeprazole',
+      name: 'Omeprazole 20mg',
+      genericName: 'Omeprazole',
+      batchNo: 'OMP-2026-02',
+      expiryDate: new Date('2027-10-31'),
+      stock: 220,
+      unitPrice: 28,
     },
   });
 
