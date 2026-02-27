@@ -1,8 +1,11 @@
-import { Button, Form, Input, InputNumber, Modal, Select, Space, Table, Typography } from 'antd';
+import { Button, Form, Input, InputNumber, Modal, Select, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { createInvoice, getDoctors, getInvoices, getPatients, recordInvoicePayment } from '../services/api';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
+import { PageHeader } from '../components/common/PageHeader';
+import { SearchFilterBar } from '../components/common/SearchFilterBar';
+import { DataTableWrapper } from '../components/common/DataTableWrapper';
 
 export function BillingPage() {
   const { user } = useAuth();
@@ -30,18 +33,26 @@ export function BillingPage() {
   }, []);
 
   async function submit() {
-    const values = await form.validateFields();
-    await createInvoice(values);
-    setOpen(false);
-    form.resetFields();
-    load();
+    try {
+      const values = await form.validateFields();
+      await createInvoice(values);
+      message.success('Invoice created successfully');
+      setOpen(false);
+      form.resetFields();
+      await load();
+    } catch {
+      message.error('Unable to create invoice');
+    }
   }
 
   return (
-    <div>
-      <Typography.Title level={3}>Billing</Typography.Title>
-      {canCreateInvoice ? <Button type="primary" onClick={() => setOpen(true)} style={{ marginBottom: 12 }}>Create Invoice</Button> : null}
-      <Table
+    <div className="page-shell">
+      <PageHeader title="Billing" subtitle="Track invoices, payments, and receivables across services." />
+      <SearchFilterBar
+        placeholder="Search invoices by patient/type"
+        actions={canCreateInvoice ? <Button type="primary" onClick={() => setOpen(true)}>Create Invoice</Button> : null}
+      />
+      <DataTableWrapper
         rowKey="id"
         dataSource={rows}
         columns={[
@@ -52,7 +63,21 @@ export function BillingPage() {
           { title: 'Status', dataIndex: 'status' },
           {
             title: 'Actions',
-            render: (_, r) => canRecordPayment ? <Button onClick={async () => { await recordInvoicePayment(r.id, 500); load(); }}>Add 500 Payment</Button> : 'View Only',
+            render: (_, r) => canRecordPayment ? (
+              <Button
+                onClick={async () => {
+                  try {
+                    await recordInvoicePayment(r.id, 500);
+                    message.success('Payment recorded');
+                    await load();
+                  } catch {
+                    message.error('Unable to record payment');
+                  }
+                }}
+              >
+                Add 500 Payment
+              </Button>
+            ) : 'View Only',
           },
         ]}
       />

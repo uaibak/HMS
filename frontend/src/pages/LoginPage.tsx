@@ -1,7 +1,7 @@
 import { Alert, Button, Card, Form, Input, Typography } from 'antd';
 import { useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 
 export function LoginPage() {
   const [loading, setLoading] = useState(false);
@@ -25,9 +25,14 @@ export function LoginPage() {
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: '#f5f5f5' }}>
-      <Card style={{ width: 360 }}>
-        <Typography.Title level={3}>HMS Login</Typography.Title>
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(130deg, #e0f2fe 0%, #f8fafc 46%, #ecfeff 100%)' }}>
+      <Card className="surface-card" style={{ width: 380 }}>
+        <Typography.Text type="secondary" style={{ letterSpacing: 1.2, fontWeight: 700 }}>
+          HMS CONSOLE
+        </Typography.Text>
+        <Typography.Title level={3} style={{ marginTop: 6 }}>
+          Sign in to continue
+        </Typography.Title>
         {error ? <Alert type="error" message={error} style={{ marginBottom: 12 }} /> : null}
         <Form layout="vertical" onFinish={onFinish}>
           <Form.Item name="email" label="Email" rules={[{ required: true, type: 'email' }]}>

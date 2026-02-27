@@ -2,6 +2,7 @@ import { Card, Col, Row, Typography } from 'antd';
 import { useEffect, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { getDashboardSummary } from '../services/api';
+import { PageHeader } from '../components/common/PageHeader';
 
 export function ReportsPage() {
   const [summary, setSummary] = useState<any>(null);
@@ -11,11 +12,11 @@ export function ReportsPage() {
   }, []);
 
   return (
-    <div>
-      <Typography.Title level={3}>Reports</Typography.Title>
+    <div className="page-shell">
+      <PageHeader title="Reports" subtitle="Visual analytics across patients, revenue, and lab operations." />
       <Row gutter={16}>
         <Col span={12}>
-          <Card title="Core KPIs">
+          <Card className="surface-card" title="Core KPIs">
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={[
                 { name: 'Patients', value: summary?.patientCount || 0 },
@@ -32,7 +33,7 @@ export function ReportsPage() {
           </Card>
         </Col>
         <Col span={12}>
-          <Card title="Lab Status Summary">
+          <Card className="surface-card" title="Lab Status Summary">
             <ResponsiveContainer width="100%" height={260}>
               <PieChart>
                 <Pie dataKey="_count._all" nameKey="sampleStatus" data={summary?.labSummary || []} outerRadius={90} fill="#13c2c2" label />

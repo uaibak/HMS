@@ -1,6 +1,10 @@
-import { Button, Form, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
+import { Button, Form, Input, Modal, Select, Space, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { createUser, deleteUser, getUsers, updateUser } from '../services/api';
+import { PageHeader } from '../components/common/PageHeader';
+import { DataTableWrapper } from '../components/common/DataTableWrapper';
+import { SearchFilterBar } from '../components/common/SearchFilterBar';
+import { ConfirmActionButton } from '../components/common/ConfirmActionButton';
 
 export function UsersPage() {
   const [rows, setRows] = useState<any[]>([]);
@@ -8,6 +12,7 @@ export function UsersPage() {
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
 
   async function load(p = page) {
@@ -23,20 +28,28 @@ export function UsersPage() {
 
   async function submit() {
     const values = await form.validateFields();
-    if (editing) await updateUser(editing.id, values);
-    else await createUser(values);
-    message.success('Saved');
-    form.resetFields();
-    setOpen(false);
-    setEditing(null);
-    load(page);
+    setSaving(true);
+    try {
+      if (editing) await updateUser(editing.id, values);
+      else await createUser(values);
+      message.success('User saved successfully');
+      form.resetFields();
+      setOpen(false);
+      setEditing(null);
+      await load(page);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div>
-      <Typography.Title level={3}>User Management</Typography.Title>
-      <Button type="primary" onClick={() => setOpen(true)} style={{ marginBottom: 12 }}>Add User</Button>
-      <Table
+    <div className="page-shell">
+      <PageHeader title="User Management" subtitle="Manage hospital staff accounts and role assignments." />
+      <SearchFilterBar
+        placeholder="Search by name or email"
+        actions={<Button type="primary" onClick={() => setOpen(true)}>Add User</Button>}
+      />
+      <DataTableWrapper
         rowKey="id"
         dataSource={rows}
         pagination={{ current: page, total, onChange: load }}
@@ -49,13 +62,29 @@ export function UsersPage() {
             render: (_, r) => (
               <Space>
                 <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue({ ...r, role: r.role?.name, password: '' }); }}>Edit</Button>
-                <Button danger onClick={async () => { await deleteUser(r.id); load(page); }}>Delete</Button>
+                <ConfirmActionButton
+                  danger
+                  title="Delete this user?"
+                  onConfirm={async () => {
+                    await deleteUser(r.id);
+                    message.success('User removed');
+                    await load(page);
+                  }}
+                >
+                  Delete
+                </ConfirmActionButton>
               </Space>
             ),
           },
         ]}
       />
-      <Modal open={open} onCancel={() => { setOpen(false); setEditing(null); }} onOk={submit} title={editing ? 'Edit User' : 'Add User'}>
+      <Modal
+        open={open}
+        onCancel={() => { setOpen(false); setEditing(null); }}
+        onOk={submit}
+        okButtonProps={{ loading: saving }}
+        title={editing ? 'Edit User' : 'Add User'}
+      >
         <Form form={form} layout="vertical">
           <Form.Item name="firstName" label="First Name" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="lastName" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item>

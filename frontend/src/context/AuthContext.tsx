@@ -1,7 +1,7 @@
-import { createContext, useContext, useMemo, useState } from 'react';
+import { createContext, useMemo, useState } from 'react';
 import { login as loginApi } from '../services/api';
 
-type User = {
+export type User = {
   id: string;
   email: string;
   firstName: string;
@@ -10,14 +10,14 @@ type User = {
   doctorId?: string | null;
 };
 
-type AuthContextValue = {
+export type AuthContextValue = {
   user: User | null;
   token: string | null;
   login: (email: string, password: string) => Promise<void>;
   logout: () => void;
 };
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+export const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = useState<string | null>(localStorage.getItem('hms_token'));
@@ -48,12 +48,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth must be used inside AuthProvider');
-  }
-  return ctx;
 }

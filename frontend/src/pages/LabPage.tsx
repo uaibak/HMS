@@ -1,8 +1,11 @@
-import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Typography, message } from 'antd';
+import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Tabs, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { createLabOrder, createLabTest, getLabOrders, getLabTests, getPatients, updateLabOrder, updateLabTest } from '../services/api';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
+import { PageHeader } from '../components/common/PageHeader';
+import { SearchFilterBar } from '../components/common/SearchFilterBar';
+import { DataTableWrapper } from '../components/common/DataTableWrapper';
 
 type PatientOption = {
   id: string;
@@ -27,7 +30,6 @@ export function LabPage() {
   const [orderForm] = Form.useForm();
   const [testForm] = Form.useForm();
 
-  const isDoctor = user?.role === 'DOCTOR';
   const canCreateLabOrder = can(user?.role, 'lab', 'create');
   const canManageTests = user?.role === 'ADMIN' || user?.role === 'LAB_TECHNICIAN';
   const canCompleteLabOrder = user?.role === 'ADMIN' || user?.role === 'LAB_TECHNICIAN';
@@ -82,7 +84,7 @@ export function LabPage() {
     setOrderModalOpen(false);
     orderForm.resetFields();
     setSelectedPatient(null);
-    load();
+    await load();
   }
 
   async function submitTest() {
@@ -97,17 +99,21 @@ export function LabPage() {
     setTestModalOpen(false);
     setEditingTest(null);
     testForm.resetFields();
-    load();
+    await load();
   }
 
   return (
-    <div>
-      <Typography.Title level={3}>Lab</Typography.Title>
-
-      <Space style={{ marginBottom: 12 }}>
-        {canCreateLabOrder ? <Button type="primary" onClick={openOrderModal}>Create Lab Order</Button> : null}
-        {canManageTests ? <Button onClick={openCreateTestModal}>Add Test Catalog Item</Button> : null}
-      </Space>
+    <div className="page-shell">
+      <PageHeader title="Laboratory" subtitle="Manage lab orders, test catalog, and result lifecycle." />
+      <SearchFilterBar
+        placeholder="Search lab data"
+        actions={
+          <Space>
+            {canCreateLabOrder ? <Button type="primary" onClick={openOrderModal}>Create Lab Order</Button> : null}
+            {canManageTests ? <Button onClick={openCreateTestModal}>Add Test Catalog Item</Button> : null}
+          </Space>
+        }
+      />
 
       <Tabs
         items={[
@@ -115,7 +121,7 @@ export function LabPage() {
             key: 'orders',
             label: 'Lab Orders',
             children: (
-              <Table rowKey="id" dataSource={orders} columns={[
+              <DataTableWrapper rowKey="id" dataSource={orders} columns={[
                 { title: 'Patient', render: (_, r) => `${r.patient?.firstName || ''} ${r.patient?.lastName || ''}` },
                 { title: 'Test', render: (_, r) => r.test?.name },
                 { title: 'Status', dataIndex: 'sampleStatus' },
@@ -127,7 +133,7 @@ export function LabPage() {
                       onClick={async () => {
                         await updateLabOrder(record.id, { sampleStatus: 'COMPLETED' });
                         message.success('Lab order marked completed');
-                        load();
+                        await load();
                       }}
                     >
                       Mark Completed
@@ -141,7 +147,7 @@ export function LabPage() {
             key: 'tests',
             label: 'Test Catalog',
             children: (
-              <Table rowKey="id" dataSource={tests} columns={[
+              <DataTableWrapper rowKey="id" dataSource={tests} columns={[
                 { title: 'Name', dataIndex: 'name' },
                 { title: 'Description', dataIndex: 'description' },
                 { title: 'Price', dataIndex: 'price' },

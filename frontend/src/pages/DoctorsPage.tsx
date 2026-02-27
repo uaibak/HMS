@@ -1,8 +1,12 @@
-import { Button, Form, Input, Modal, Space, Table, Typography } from 'antd';
+import { Button, Form, Input, Modal, Space, Tag, message } from 'antd';
 import { useEffect, useState } from 'react';
 import { createDoctor, deleteDoctor, getDoctors, updateDoctor } from '../services/api';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
+import { PageHeader } from '../components/common/PageHeader';
+import { SearchFilterBar } from '../components/common/SearchFilterBar';
+import { DataTableWrapper } from '../components/common/DataTableWrapper';
+import { ConfirmActionButton } from '../components/common/ConfirmActionButton';
 
 export function DoctorsPage() {
   const { user } = useAuth();
@@ -11,6 +15,7 @@ export function DoctorsPage() {
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<any>(null);
+  const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
   const canManageDoctors = can(user?.role, 'doctors', 'create');
 
@@ -31,19 +36,36 @@ export function DoctorsPage() {
     };
     delete payload.from;
     delete payload.to;
-    if (editing) await updateDoctor(editing.id, payload);
-    else await createDoctor(payload);
-    setOpen(false);
-    setEditing(null);
-    form.resetFields();
-    load(page);
+    setSaving(true);
+    try {
+      if (editing) await updateDoctor(editing.id, payload);
+      else await createDoctor(payload);
+      message.success('Doctor profile saved');
+      setOpen(false);
+      setEditing(null);
+      form.resetFields();
+      await load(page);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div>
-      <Typography.Title level={3}>Doctor Management</Typography.Title>
-      {canManageDoctors ? <Button type="primary" onClick={() => setOpen(true)} style={{ marginBottom: 12 }}>Add Doctor</Button> : null}
-      <Table
+    <div className="page-shell">
+      <PageHeader
+        title="Doctor Management"
+        subtitle="Schedules, specializations, and provider directory."
+        roleTag={!canManageDoctors ? 'View Only' : undefined}
+      />
+      <SearchFilterBar
+        placeholder="Search by doctor name or specialization"
+        actions={
+          canManageDoctors
+            ? <Button type="primary" onClick={() => setOpen(true)}>Add Doctor</Button>
+            : <Tag color="default">Read-only access</Tag>
+        }
+      />
+      <DataTableWrapper
         rowKey="id"
         dataSource={rows}
         pagination={{ current: page, total, onChange: load }}
@@ -58,14 +80,30 @@ export function DoctorsPage() {
               canManageDoctors ? (
                 <Space>
                   <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue(r); }}>Edit</Button>
-                  <Button danger onClick={async () => { await deleteDoctor(r.id); load(page); }}>Delete</Button>
+                  <ConfirmActionButton
+                    danger
+                    title="Delete this doctor?"
+                    onConfirm={async () => {
+                      await deleteDoctor(r.id);
+                      message.success('Doctor removed');
+                      await load(page);
+                    }}
+                  >
+                    Delete
+                  </ConfirmActionButton>
                 </Space>
               ) : 'View Only'
             ),
           },
         ]}
       />
-      <Modal open={open} title={editing ? 'Edit Doctor' : 'Add Doctor'} onCancel={() => setOpen(false)} onOk={submit}>
+      <Modal
+        open={open}
+        title={editing ? 'Edit Doctor' : 'Add Doctor'}
+        onCancel={() => setOpen(false)}
+        onOk={submit}
+        okButtonProps={{ loading: saving }}
+      >
         <Form form={form} layout="vertical">
           <Form.Item name="firstName" label="First Name" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="lastName" label="Last Name" rules={[{ required: true }]}><Input /></Form.Item>

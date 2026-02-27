@@ -15,7 +15,17 @@ export class AppointmentsService {
   private static readonly DEFAULT_OPD_FEE = 1500;
 
   async create(dto: CreateAppointmentDto, actor: Actor) {
-    const appointment = await this.prisma.appointment.create({ data: dto });
+    const appointment = await this.prisma.appointment.create({
+      data: {
+        patientId: dto.patientId,
+        doctorId: dto.doctorId,
+        appointmentDate: dto.appointmentDate,
+        reason: dto.reason,
+        visitNotes: dto.visitNotes,
+        // Always start with BOOKED status at booking time.
+        status: AppointmentStatus.BOOKED,
+      },
+    });
     await this.prisma.auditLog.create({
       data: {
         userId: actor.userId,
@@ -61,6 +71,9 @@ export class AppointmentsService {
   async update(id: string, dto: UpdateAppointmentDto, actor: Actor) {
     const appointment = await this.findOne(id);
     if (!appointment) throw new NotFoundException('Appointment not found');
+    if (appointment.status === AppointmentStatus.COMPLETED) {
+      throw new BadRequestException('Completed appointments cannot be modified');
+    }
 
     if (actor.role === RoleName.DOCTOR) {
       const doctor = await this.prisma.doctor.findUnique({ where: { userId: actor.userId } });
@@ -79,7 +92,8 @@ export class AppointmentsService {
         where: { id },
         data: {
           appointmentDate: dto.appointmentDate ?? appointment.appointmentDate,
-          status: isDoctorComplete ? AppointmentStatus.COMPLETED : appointment.status,
+          // Reschedule must keep status BOOKED; completion is explicit.
+          status: isDoctorComplete ? AppointmentStatus.COMPLETED : AppointmentStatus.BOOKED,
           reason: dto.reason,
         },
       });
@@ -100,7 +114,29 @@ export class AppointmentsService {
       return updatedByDoctor;
     }
 
-    const updated = await this.prisma.appointment.update({ where: { id }, data: dto });
+    let updated;
+    if (dto.appointmentDate) {
+      // Rescheduling path: status is always reset/kept to BOOKED.
+      updated = await this.prisma.appointment.update({
+        where: { id },
+        data: {
+          appointmentDate: dto.appointmentDate,
+          reason: dto.reason,
+          visitNotes: dto.visitNotes,
+          status: AppointmentStatus.BOOKED,
+        },
+      });
+    } else if (dto.status === AppointmentStatus.COMPLETED || dto.status === AppointmentStatus.CANCELLED) {
+      updated = await this.prisma.appointment.update({
+        where: { id },
+        data: { status: dto.status, reason: dto.reason, visitNotes: dto.visitNotes },
+      });
+    } else {
+      updated = await this.prisma.appointment.update({
+        where: { id },
+        data: { reason: dto.reason, visitNotes: dto.visitNotes },
+      });
+    }
     if (updated.status === AppointmentStatus.COMPLETED) {
       await this.createOpdInvoiceIfMissing(updated.id, updated.patientId, updated.doctorId);
     }
@@ -146,6 +182,11 @@ export class AppointmentsService {
   }
 
   async remove(id: string, actor: Actor) {
+    const appointment = await this.findOne(id);
+    if (!appointment) throw new NotFoundException('Appointment not found');
+    if (appointment.status === AppointmentStatus.COMPLETED) {
+      throw new BadRequestException('Completed appointments cannot be deleted');
+    }
     const deleted = await this.prisma.appointment.delete({ where: { id } });
     await this.prisma.auditLog.create({
       data: {

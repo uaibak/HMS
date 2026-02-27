@@ -1,6 +1,7 @@
 import { Button, Form, Input, Typography, message } from 'antd';
 import { useEffect } from 'react';
 import { getSettings, saveSettings } from '../services/api';
+import { PageHeader } from '../components/common/PageHeader';
 
 export function SettingsPage() {
   const [form] = Form.useForm();
@@ -18,17 +19,21 @@ export function SettingsPage() {
   }, [form]);
 
   async function submit(values: any) {
-    await saveSettings({
-      ...values,
-      rolesConfig: JSON.parse(values.rolesConfig),
-      permissionsConfig: JSON.parse(values.permissionsConfig),
-    });
-    message.success('Settings saved');
+    try {
+      await saveSettings({
+        ...values,
+        rolesConfig: JSON.parse(values.rolesConfig),
+        permissionsConfig: JSON.parse(values.permissionsConfig),
+      });
+      message.success('Settings saved');
+    } catch {
+      message.error('Unable to save settings');
+    }
   }
 
   return (
-    <div>
-      <Typography.Title level={3}>Settings</Typography.Title>
+    <div className="page-shell">
+      <PageHeader title="Settings" subtitle="Configure hospital profile, role policy, and permission metadata." />
       <Form layout="vertical" form={form} onFinish={submit}>
         <Form.Item name="hospitalName" label="Hospital Name" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="hospitalEmail" label="Hospital Email" rules={[{ required: true }]}><Input /></Form.Item>

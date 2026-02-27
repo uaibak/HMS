@@ -1,23 +1,43 @@
-import { Card, Col, Row, Statistic, Table, Typography } from 'antd';
+import { Alert, Card, Col, Row, Skeleton, Table } from 'antd';
 import { useEffect, useState } from 'react';
 import { getDashboardSummary } from '../services/api';
+import { PageHeader } from '../components/common/PageHeader';
+import { StatCard } from '../components/common/StatCard';
 
 export function DashboardPage() {
   const [summary, setSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    getDashboardSummary().then(setSummary);
+    getDashboardSummary()
+      .then(setSummary)
+      .finally(() => setLoading(false));
   }, []);
 
   return (
-    <div>
-      <Typography.Title level={3}>Dashboard</Typography.Title>
-      <Row gutter={16}>
-        <Col span={8}><Card><Statistic title="Patients" value={summary?.patientCount ?? 0} /></Card></Col>
-        <Col span={8}><Card><Statistic title="Appointments" value={summary?.appointmentCount ?? 0} /></Card></Col>
-        <Col span={8}><Card><Statistic title="Revenue" value={summary?.revenue ?? 0} prefix="PKR" /></Card></Col>
+    <div className="page-shell">
+      <PageHeader
+        title="Operations Dashboard"
+        subtitle="Live overview of patient load, appointments, revenue and inventory risk."
+      />
+
+      {loading ? <Skeleton active paragraph={{ rows: 6 }} /> : null}
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} md={8}><StatCard label="Total Patients" value={summary?.patientCount ?? 0} tone="info" /></Col>
+        <Col xs={24} md={8}><StatCard label="Appointments" value={summary?.appointmentCount ?? 0} tone="success" /></Col>
+        <Col xs={24} md={8}><StatCard label="Revenue" value={summary?.revenue ?? 0} suffix="PKR" tone="warning" /></Col>
       </Row>
-      <Card style={{ marginTop: 16 }} title="Low Stock Medicines">
+
+      {(summary?.lowStockMedicines || []).length ? (
+        <Alert
+          type="warning"
+          showIcon
+          message={`Low stock alert: ${summary.lowStockMedicines.length} medicine(s) need replenishment.`}
+        />
+      ) : null}
+
+      <Card className="surface-card" title="Low Stock Medicines">
         <Table
           rowKey="id"
           dataSource={summary?.lowStockMedicines || []}

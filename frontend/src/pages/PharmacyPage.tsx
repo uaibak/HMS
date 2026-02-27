@@ -1,4 +1,4 @@
-import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Table, Tabs, Typography, message } from 'antd';
+import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Tabs, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import {
   createMedicine,
@@ -7,8 +7,10 @@ import {
   getPharmacyTransactions,
   prescribeMedicine,
 } from '../services/api';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
+import { PageHeader } from '../components/common/PageHeader';
+import { DataTableWrapper } from '../components/common/DataTableWrapper';
 
 type MedicineRow = {
   id: string;
@@ -60,7 +62,7 @@ export function PharmacyPage() {
     message.success('Medicine added to inventory');
     setInventoryModalOpen(false);
     inventoryForm.resetFields();
-    load();
+    await load();
   }
 
   async function submitPrescription() {
@@ -82,7 +84,7 @@ export function PharmacyPage() {
     message.success('Medicine suggested successfully. Invoice entry added for patient billing.');
     setPrescriptionModalOpen(false);
     prescriptionForm.resetFields();
-    load();
+    await load();
   }
 
   const selectedMedicineId = Form.useWatch('medicineId', prescriptionForm);
@@ -95,8 +97,8 @@ export function PharmacyPage() {
   }, [selectedMedicine, selectedQuantity]);
 
   return (
-    <div>
-      <Typography.Title level={3}>Pharmacy</Typography.Title>
+    <div className="page-shell">
+      <PageHeader title="Pharmacy" subtitle="Inventory, prescriptions, and dispensing transactions." />
 
       <Space style={{ marginBottom: 12 }}>
         {canManageInventory ? (
@@ -126,7 +128,7 @@ export function PharmacyPage() {
             key: 'inventory',
             label: 'Inventory',
             children: (
-              <Table
+              <DataTableWrapper
                 rowKey="id"
                 dataSource={medicines}
                 columns={[
@@ -143,7 +145,7 @@ export function PharmacyPage() {
             key: 'transactions',
             label: 'Transactions',
             children: (
-              <Table
+              <DataTableWrapper
                 rowKey="id"
                 dataSource={transactions}
                 columns={[

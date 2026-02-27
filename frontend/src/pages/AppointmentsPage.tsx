@@ -1,9 +1,12 @@
-import { Button, Card, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Table, Typography, message } from 'antd';
+import { Button, Card, DatePicker, Descriptions, Form, Input, Modal, Select, Space, Tag, message } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
 import { cancelAppointment, createAppointment, getAppointments, getDoctors, getPatients, updateAppointment } from '../services/api';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
+import { PageHeader } from '../components/common/PageHeader';
+import { DataTableWrapper } from '../components/common/DataTableWrapper';
+import { SearchFilterBar } from '../components/common/SearchFilterBar';
 
 type PatientOption = {
   id: string;
@@ -89,37 +92,39 @@ export function AppointmentsPage() {
       doctorId: record.doctor?.id,
       appointmentDate: dayjs(record.appointmentDate),
       reason: record.reason,
-      status: record.status,
     });
   }
 
   async function submit() {
-    const values = await form.validateFields();
+    try {
+      const values = await form.validateFields();
 
-    if (editing) {
-      const payload = {
-        appointmentDate: values.appointmentDate.toISOString(),
-        reason: values.reason,
-        ...(isDoctor ? {} : { status: values.status }),
-      };
-      await updateAppointment(editing.id, payload);
-      message.success('Appointment updated');
-    } else {
-      const payload = {
-        patientId: values.patientId,
-        doctorId: isDoctor ? user?.doctorId : values.doctorId,
-        appointmentDate: values.appointmentDate.toISOString(),
-        reason: values.reason,
-      };
-      await createAppointment(payload);
-      message.success('Appointment created');
+      if (editing) {
+        const payload = {
+          appointmentDate: values.appointmentDate.toISOString(),
+          reason: values.reason,
+        };
+        await updateAppointment(editing.id, payload);
+        message.success('Appointment updated');
+      } else {
+        const payload = {
+          patientId: values.patientId,
+          doctorId: isDoctor ? user?.doctorId : values.doctorId,
+          appointmentDate: values.appointmentDate.toISOString(),
+          reason: values.reason,
+        };
+        await createAppointment(payload);
+        message.success('Appointment created');
+      }
+
+      setOpen(false);
+      setEditing(null);
+      setSelectedPatient(null);
+      form.resetFields();
+      await load(page);
+    } catch {
+      message.error('Unable to save appointment');
     }
-
-    setOpen(false);
-    setEditing(null);
-    setSelectedPatient(null);
-    form.resetFields();
-    load(page);
   }
 
   const columns = useMemo(
@@ -132,23 +137,34 @@ export function AppointmentsPage() {
         title: 'Actions',
         render: (_: unknown, r: any) => (
           <Space>
-            {canReschedule && (!isDoctor || r.doctorId === user?.doctorId) ? (
+            {canReschedule && r.status === 'BOOKED' && (!isDoctor || r.doctorId === user?.doctorId) ? (
               <Button onClick={() => openEditModal(r)}>Reschedule</Button>
             ) : null}
-            {canMarkCompleted && r.status !== 'COMPLETED' && (!isDoctor || r.doctorId === user?.doctorId) ? (
+            {canMarkCompleted && r.status === 'BOOKED' && (!isDoctor || r.doctorId === user?.doctorId) ? (
               <Button
                 type="default"
                 onClick={async () => {
                   await updateAppointment(r.id, { status: 'COMPLETED' });
                   message.success('Appointment marked completed');
-                  load(page);
+                  await load(page);
                 }}
               >
                 Mark Completed
               </Button>
             ) : null}
-            {canCancel ? (
-              <Button danger onClick={async () => { await cancelAppointment(r.id); load(page); }}>
+            {canCancel && r.status === 'BOOKED' ? (
+              <Button
+                danger
+                onClick={async () => {
+                  try {
+                    await cancelAppointment(r.id);
+                    message.success('Appointment cancelled');
+                    await load(page);
+                  } catch {
+                    message.error('Unable to cancel appointment');
+                  }
+                }}
+              >
                 Cancel
               </Button>
             ) : null}
@@ -160,14 +176,21 @@ export function AppointmentsPage() {
   );
 
   return (
-    <div>
-      <Typography.Title level={3}>Appointments</Typography.Title>
-      {canSchedule ? (
-        <Button type="primary" onClick={openCreateModal} style={{ marginBottom: 12 }}>
-          Schedule
-        </Button>
-      ) : null}
-      <Table rowKey="id" dataSource={rows} pagination={{ current: page, total, onChange: load }} columns={columns} />
+    <div className="page-shell">
+      <PageHeader
+        title="Appointments"
+        subtitle="Book, reschedule, complete, and monitor consultation flow."
+        roleTag={isDoctor ? 'Doctor Scope' : undefined}
+      />
+      <SearchFilterBar
+        placeholder="Search appointments"
+        actions={
+          canSchedule
+            ? <Button type="primary" onClick={openCreateModal}>Schedule</Button>
+            : <Tag color="default">Read-only create permissions</Tag>
+        }
+      />
+      <DataTableWrapper rowKey="id" dataSource={rows} pagination={{ current: page, total, onChange: load }} columns={columns} />
 
       <Modal
         open={open}
@@ -226,11 +249,6 @@ export function AppointmentsPage() {
             <Input />
           </Form.Item>
 
-          {!isDoctor && can(user?.role, 'appointments', 'update') ? (
-            <Form.Item name="status" label="Status">
-              <Select options={['BOOKED', 'COMPLETED', 'CANCELLED'].map((x) => ({ label: x, value: x }))} />
-            </Form.Item>
-          ) : null}
         </Form>
       </Modal>
     </div>
