@@ -1,8 +1,9 @@
-import { Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Tabs, message } from 'antd';
+import { App, Button, Card, Descriptions, Form, Input, InputNumber, Modal, Select, Space, Tabs } from 'antd';
 import { useEffect, useState } from 'react';
 import { createLabOrder, createLabTest, getLabOrders, getLabTests, getPatients, updateLabOrder, updateLabTest } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
+import { formatShortId } from '../utils/idFormat';
 import { PageHeader } from '../components/common/PageHeader';
 import { SearchFilterBar } from '../components/common/SearchFilterBar';
 import { DataTableWrapper } from '../components/common/DataTableWrapper';
@@ -17,11 +18,17 @@ type PatientOption = {
 };
 
 export function LabPage() {
+  const { message } = App.useApp();
   const { user } = useAuth();
   const [orders, setOrders] = useState<any[]>([]);
   const [tests, setTests] = useState<any[]>([]);
+  const [loadingOrders, setLoadingOrders] = useState(false);
+  const [loadingTests, setLoadingTests] = useState(false);
+  const [completingOrderId, setCompletingOrderId] = useState<string | null>(null);
   const [patients, setPatients] = useState<PatientOption[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<PatientOption | null>(null);
+  const [submittingOrder, setSubmittingOrder] = useState(false);
+  const [submittingTest, setSubmittingTest] = useState(false);
 
   const [orderModalOpen, setOrderModalOpen] = useState(false);
   const [testModalOpen, setTestModalOpen] = useState(false);
@@ -35,14 +42,27 @@ export function LabPage() {
   const canCompleteLabOrder = user?.role === 'ADMIN' || user?.role === 'LAB_TECHNICIAN';
 
   async function load() {
-    const [ordersRes, testsRes] = await Promise.all([getLabOrders(1, 50), getLabTests(1, 50)]);
-    setOrders(ordersRes.data);
-    setTests(testsRes);
+    try {
+      setLoadingOrders(true);
+      setLoadingTests(true);
+      const [ordersRes, testsRes] = await Promise.all([getLabOrders(1, 50), getLabTests(1, 50)]);
+      setOrders(ordersRes.data);
+      setTests(testsRes);
+    } catch {
+      message.error('Unable to load lab data');
+    } finally {
+      setLoadingOrders(false);
+      setLoadingTests(false);
+    }
   }
 
   async function searchPatients(search = '') {
-    const res = await getPatients({ page: 1, limit: 50, search });
-    setPatients(res.data);
+    try {
+      const res = await getPatients({ page: 1, limit: 50, search });
+      setPatients(res.data);
+    } catch {
+      message.error('Unable to search patients');
+    }
   }
 
   useEffect(() => {
@@ -74,32 +94,54 @@ export function LabPage() {
   }
 
   async function submitOrder() {
-    const values = await orderForm.validateFields();
-    await createLabOrder({
-      patientId: values.patientId,
-      testId: values.testId,
-      orderedById: user?.id,
-    });
-    message.success('Lab order created');
-    setOrderModalOpen(false);
-    orderForm.resetFields();
-    setSelectedPatient(null);
-    await load();
+    let shouldReload = false;
+    try {
+      setSubmittingOrder(true);
+      const values = await orderForm.validateFields();
+      await createLabOrder({
+        patientId: values.patientId,
+        testId: values.testId,
+      });
+      shouldReload = true;
+      message.success('Lab order created');
+      setOrderModalOpen(false);
+      orderForm.resetFields();
+      setSelectedPatient(null);
+    } catch {
+      message.error('Unable to create lab order');
+    } finally {
+      if (shouldReload) {
+        await load();
+      }
+      setSubmittingOrder(false);
+    }
   }
 
   async function submitTest() {
-    const values = await testForm.validateFields();
-    if (editingTest) {
-      await updateLabTest(editingTest.id, values);
-      message.success('Lab test updated');
-    } else {
-      await createLabTest(values);
-      message.success('Lab test created');
+    let shouldReload = false;
+    try {
+      setSubmittingTest(true);
+      const values = await testForm.validateFields();
+      if (editingTest) {
+        await updateLabTest(editingTest.id, values);
+        shouldReload = true;
+        message.success('Lab test updated');
+      } else {
+        await createLabTest(values);
+        shouldReload = true;
+        message.success('Lab test created');
+      }
+      setTestModalOpen(false);
+      setEditingTest(null);
+      testForm.resetFields();
+    } catch {
+      message.error('Unable to save lab test');
+    } finally {
+      if (shouldReload) {
+        await load();
+      }
+      setSubmittingTest(false);
     }
-    setTestModalOpen(false);
-    setEditingTest(null);
-    testForm.resetFields();
-    await load();
   }
 
   return (
@@ -130,24 +172,32 @@ export function LabPage() {
                   title: 'Actions',
                   render: (_, record) => canCompleteLabOrder && record.sampleStatus !== 'COMPLETED' ? (
                     <Button
+                      loading={completingOrderId === record.id}
                       onClick={async () => {
-                        await updateLabOrder(record.id, { sampleStatus: 'COMPLETED' });
-                        message.success('Lab order marked completed');
-                        await load();
+                        try {
+                          setCompletingOrderId(record.id);
+                          await updateLabOrder(record.id, { sampleStatus: 'COMPLETED' });
+                          await load();
+                          message.success('Lab order marked completed');
+                        } catch {
+                          message.error('Unable to mark lab order completed');
+                        } finally {
+                          setCompletingOrderId(null);
+                        }
                       }}
                     >
                       Mark Completed
                     </Button>
                   ) : 'View Only',
                 },
-              ]} />
+              ]} loading={loadingOrders} />
             ),
           },
           {
             key: 'tests',
             label: 'Test Catalog',
             children: (
-              <DataTableWrapper rowKey="id" dataSource={tests} columns={[
+              <DataTableWrapper rowKey="id" dataSource={tests} loading={loadingTests} columns={[
                 { title: 'Name', dataIndex: 'name' },
                 { title: 'Description', dataIndex: 'description' },
                 { title: 'Price', dataIndex: 'price' },
@@ -163,7 +213,13 @@ export function LabPage() {
         ]}
       />
 
-      <Modal open={orderModalOpen && canCreateLabOrder} title="Create Lab Order" onCancel={() => setOrderModalOpen(false)} onOk={submitOrder}>
+      <Modal
+        open={orderModalOpen && canCreateLabOrder}
+        title="Create Lab Order"
+        onCancel={() => setOrderModalOpen(false)}
+        onOk={submitOrder}
+        okButtonProps={{ loading: submittingOrder }}
+      >
         <Form form={orderForm} layout="vertical">
           <Form.Item name="patientId" label="Patient" rules={[{ required: true, message: 'Please select a patient' }]}>
             <Select
@@ -176,14 +232,17 @@ export function LabPage() {
                 const patient = patients.find((x) => x.id === id) || null;
                 setSelectedPatient(patient);
               }}
-              options={patients.map((p) => ({ label: `${p.firstName} ${p.lastName} (${p.cnic})`, value: p.id }))}
+              options={patients.map((p) => ({
+                label: `${formatShortId(p.id, 'PAT')} | ${p.firstName} ${p.lastName} (${p.cnic})`,
+                value: p.id,
+              }))}
             />
           </Form.Item>
 
           {selectedPatient ? (
             <Card size="small" style={{ marginBottom: 12 }}>
               <Descriptions size="small" column={1}>
-                <Descriptions.Item label="Patient ID">{selectedPatient.id}</Descriptions.Item>
+                <Descriptions.Item label="Patient ID">{formatShortId(selectedPatient.id, 'PAT')}</Descriptions.Item>
                 <Descriptions.Item label="Name">{selectedPatient.firstName} {selectedPatient.lastName}</Descriptions.Item>
                 <Descriptions.Item label="Phone">{selectedPatient.phone}</Descriptions.Item>
                 <Descriptions.Item label="Blood Group">{selectedPatient.bloodGroup}</Descriptions.Item>
@@ -196,12 +255,21 @@ export function LabPage() {
           </Form.Item>
 
           <Form.Item name="orderedById" label="Ordered By">
-            <Input disabled value={`${user?.firstName || ''} ${user?.lastName || ''} (${user?.id || ''})`} />
+            <Input
+              disabled
+              value={`${user?.firstName || ''} ${user?.lastName || ''} (${formatShortId(user?.id, 'USR')})`}
+            />
           </Form.Item>
         </Form>
       </Modal>
 
-      <Modal open={testModalOpen && canManageTests} title={editingTest ? 'Edit Test Catalog Item' : 'Add Test Catalog Item'} onCancel={() => setTestModalOpen(false)} onOk={submitTest}>
+      <Modal
+        open={testModalOpen && canManageTests}
+        title={editingTest ? 'Edit Test Catalog Item' : 'Add Test Catalog Item'}
+        onCancel={() => setTestModalOpen(false)}
+        onOk={submitTest}
+        okButtonProps={{ loading: submittingTest }}
+      >
         <Form form={testForm} layout="vertical">
           <Form.Item name="name" label="Test Name" rules={[{ required: true, message: 'Test name is required' }]}>
             <Input />

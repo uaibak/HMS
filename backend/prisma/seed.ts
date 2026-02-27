@@ -302,6 +302,164 @@ async function main() {
     },
   }).catch(() => undefined);
 
+  const encounter1 = await prisma.encounter.upsert({
+    where: { id: 'encounter-demo-1' },
+    update: {},
+    create: {
+      id: 'encounter-demo-1',
+      patientId: patient1.id,
+      doctorId: doctor.id,
+      status: 'OPEN',
+    },
+  });
+
+  const encounter2 = await prisma.encounter.upsert({
+    where: { id: 'encounter-demo-2' },
+    update: {},
+    create: {
+      id: 'encounter-demo-2',
+      patientId: patient2.id,
+      doctorId: doctor.id,
+      status: 'CLOSED',
+      closedAt: new Date(),
+    },
+  });
+
+  const encounterInvoice1 = await prisma.invoice.upsert({
+    where: { encounterId: encounter1.id },
+    update: {},
+    create: {
+      patientId: patient1.id,
+      doctorId: doctor.id,
+      encounterId: encounter1.id,
+      type: InvoiceType.OPD,
+      description: 'Consolidated encounter invoice',
+      subtotal: 0,
+      discount: 100,
+      tax: 50,
+      grandTotal: 0,
+      amount: 0,
+      paidAmount: 500,
+      status: InvoiceStatus.PARTIAL,
+    },
+  });
+
+  const encounterInvoice2 = await prisma.invoice.upsert({
+    where: { encounterId: encounter2.id },
+    update: {},
+    create: {
+      patientId: patient2.id,
+      doctorId: doctor.id,
+      encounterId: encounter2.id,
+      type: InvoiceType.OPD,
+      description: 'Closed encounter invoice',
+      subtotal: 0,
+      discount: 0,
+      tax: 0,
+      grandTotal: 0,
+      amount: 0,
+      paidAmount: 0,
+      status: InvoiceStatus.UNPAID,
+    },
+  });
+
+  await prisma.invoiceLine.upsert({
+    where: {
+      invoiceId_referenceType_referenceId: {
+        invoiceId: encounterInvoice1.id,
+        referenceType: 'APPOINTMENT',
+        referenceId: 'seed-appt-line',
+      },
+    },
+    update: {},
+    create: {
+      invoiceId: encounterInvoice1.id,
+      lineType: 'OPD',
+      referenceType: 'APPOINTMENT',
+      referenceId: 'seed-appt-line',
+      description: 'OPD consultation (seed)',
+      quantity: 1,
+      unitPrice: 1500,
+      lineTotal: 1500,
+    },
+  });
+
+  await prisma.invoiceLine.upsert({
+    where: {
+      invoiceId_referenceType_referenceId: {
+        invoiceId: encounterInvoice1.id,
+        referenceType: 'LAB_ORDER',
+        referenceId: 'seed-lab-line',
+      },
+    },
+    update: {},
+    create: {
+      invoiceId: encounterInvoice1.id,
+      lineType: 'LAB',
+      referenceType: 'LAB_ORDER',
+      referenceId: 'seed-lab-line',
+      description: 'CBC lab panel (seed)',
+      quantity: 1,
+      unitPrice: 800,
+      lineTotal: 800,
+    },
+  });
+
+  await prisma.invoiceLine.upsert({
+    where: {
+      invoiceId_referenceType_referenceId: {
+        invoiceId: encounterInvoice1.id,
+        referenceType: 'PHARMACY_TRANSACTION',
+        referenceId: 'seed-pharmacy-line',
+      },
+    },
+    update: {},
+    create: {
+      invoiceId: encounterInvoice1.id,
+      lineType: 'PHARMACY',
+      referenceType: 'PHARMACY_TRANSACTION',
+      referenceId: 'seed-pharmacy-line',
+      description: 'Atorvastatin dispense (seed)',
+      quantity: 2,
+      unitPrice: 45,
+      lineTotal: 90,
+    },
+  });
+
+  await prisma.invoiceLine.upsert({
+    where: {
+      invoiceId_referenceType_referenceId: {
+        invoiceId: encounterInvoice2.id,
+        referenceType: 'MANUAL',
+        referenceId: 'seed-manual-line',
+      },
+    },
+    update: {},
+    create: {
+      invoiceId: encounterInvoice2.id,
+      lineType: 'OTHER',
+      referenceType: 'MANUAL',
+      referenceId: 'seed-manual-line',
+      description: 'Follow-up service fee (seed)',
+      quantity: 1,
+      unitPrice: 1200,
+      lineTotal: 1200,
+    },
+  });
+
+  const subtotal1 = 1500 + 800 + 90;
+  const grandTotal1 = subtotal1 + 50 - 100;
+  const status1 = encounterInvoice1.paidAmount >= grandTotal1 ? InvoiceStatus.PAID : InvoiceStatus.PARTIAL;
+  await prisma.invoice.update({
+    where: { id: encounterInvoice1.id },
+    data: { subtotal: subtotal1, grandTotal: grandTotal1, amount: grandTotal1, status: status1 },
+  });
+
+  await prisma.invoice.update({
+    where: { id: encounterInvoice2.id },
+    data: { subtotal: 1200, grandTotal: 1200, amount: 1200, status: InvoiceStatus.UNPAID },
+  });
+
   await prisma.setting.upsert({
     where: { id: 'default-settings' },
     update: {},

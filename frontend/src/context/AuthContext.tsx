@@ -1,4 +1,4 @@
-import { createContext, useMemo, useState } from 'react';
+import { createContext, useEffect, useMemo, useState } from 'react';
 import { login as loginApi } from '../services/api';
 
 export type User = {
@@ -25,6 +25,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const raw = localStorage.getItem('hms_user');
     return raw ? JSON.parse(raw) : null;
   });
+
+  useEffect(() => {
+    const onUnauthorized = () => {
+      setToken(null);
+      setUser(null);
+    };
+    window.addEventListener('hms:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('hms:unauthorized', onUnauthorized);
+  }, []);
 
   const value = useMemo<AuthContextValue>(
     () => ({

@@ -4,15 +4,44 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api',
 });
 
+let pendingRequests = 0;
+
+function emitNetworkActivity() {
+  window.dispatchEvent(new CustomEvent('hms:network', { detail: { pending: pendingRequests } }));
+}
+
 api.interceptors.request.use((config) => {
+  pendingRequests += 1;
+  emitNetworkActivity();
   const token = localStorage.getItem('hms_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
-  config.headers['Cache-Control'] = 'no-cache';
-  config.headers.Pragma = 'no-cache';
   return config;
 });
+
+api.interceptors.response.use(
+  (response) => {
+    pendingRequests = Math.max(0, pendingRequests - 1);
+    emitNetworkActivity();
+    return response;
+  },
+  (error) => {
+    const status = error?.response?.status;
+    const requestUrl: string = error?.config?.url || '';
+    const isLoginRequest = requestUrl.includes('/auth/login');
+
+    if (status === 401 && !isLoginRequest) {
+      localStorage.removeItem('hms_token');
+      localStorage.removeItem('hms_user');
+      window.dispatchEvent(new Event('hms:unauthorized'));
+    }
+
+    pendingRequests = Math.max(0, pendingRequests - 1);
+    emitNetworkActivity();
+    return Promise.reject(error);
+  },
+);
 
 export { api };
 
@@ -168,6 +197,21 @@ export async function createInvoice(payload: Record<string, unknown>) {
 
 export async function recordInvoicePayment(id: string, paidAmount: number) {
   const { data } = await api.patch(`/billing/invoices/${id}/payment`, { paidAmount });
+  return data;
+}
+
+export async function getEncounters(page = 1, limit = 20) {
+  const { data } = await api.get('/billing/encounters', { params: { page, limit } });
+  return data;
+}
+
+export async function getEncounterById(id: string) {
+  const { data } = await api.get(`/billing/encounters/${id}`);
+  return data;
+}
+
+export async function closeEncounter(id: string) {
+  const { data } = await api.patch(`/billing/encounters/${id}/close`);
   return data;
 }
 

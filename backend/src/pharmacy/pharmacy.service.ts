@@ -1,10 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, RoleName, TransactionType, InvoiceType, InvoiceStatus } from '@prisma/client';
+import { InvoiceLineType, InvoiceReferenceType, Prisma, RoleName, TransactionType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateMedicineDto } from './dto/create-medicine.dto';
 import { UpdateMedicineDto } from './dto/update-medicine.dto';
 import { CreatePharmacyTransactionDto } from './dto/create-pharmacy-transaction.dto';
 import { PrescribeMedicineDto } from './dto/prescribe-medicine.dto';
+import { BillingService } from '../billing/billing.service';
 
 type Actor = {
   userId: string;
@@ -13,13 +14,22 @@ type Actor = {
 
 @Injectable()
 export class PharmacyService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly billingService: BillingService,
+  ) {}
+
+  private async safeAudit(data: Prisma.AuditLogUncheckedCreateInput) {
+    try {
+      await this.prisma.auditLog.create({ data });
+    } catch {
+      // Audit logging must not break primary pharmacy flows.
+    }
+  }
 
   async createMedicine(dto: CreateMedicineDto, actor?: Actor) {
     const medicine = await this.prisma.medicine.create({ data: dto });
-    await this.prisma.auditLog.create({
-      data: { userId: actor?.userId, action: 'CREATE_MEDICINE', module: 'PHARMACY', entityId: medicine.id },
-    });
+    await this.safeAudit({ userId: actor?.userId, action: 'CREATE_MEDICINE', module: 'PHARMACY', entityId: medicine.id });
     return medicine;
   }
 
@@ -36,23 +46,19 @@ export class PharmacyService {
     const medicine = await this.prisma.medicine.findUnique({ where: { id } });
     if (!medicine) throw new NotFoundException('Medicine not found');
     const updated = await this.prisma.medicine.update({ where: { id }, data: dto });
-    await this.prisma.auditLog.create({
-      data: {
-        userId: actor?.userId,
-        action: 'UPDATE_MEDICINE',
-        module: 'PHARMACY',
-        entityId: updated.id,
-        details: dto as unknown as Prisma.InputJsonValue,
-      },
+    await this.safeAudit({
+      userId: actor?.userId,
+      action: 'UPDATE_MEDICINE',
+      module: 'PHARMACY',
+      entityId: updated.id,
+      details: dto as unknown as Prisma.InputJsonValue,
     });
     return updated;
   }
 
   async removeMedicine(id: string, actor?: Actor) {
     const deleted = await this.prisma.medicine.delete({ where: { id } });
-    await this.prisma.auditLog.create({
-      data: { userId: actor?.userId, action: 'DELETE_MEDICINE', module: 'PHARMACY', entityId: deleted.id },
-    });
+    await this.safeAudit({ userId: actor?.userId, action: 'DELETE_MEDICINE', module: 'PHARMACY', entityId: deleted.id });
     return deleted;
   }
 
@@ -72,17 +78,38 @@ export class PharmacyService {
     ]);
 
     if (dto.type === TransactionType.SALE && dto.patientId) {
-      await this.createPharmacyInvoiceIfMissing(transaction.id, dto.patientId, dto.amount, medicine.name);
+      try {
+        await this.billingService.appendAutoLine(
+          {
+            patientId: dto.patientId,
+            lineType: InvoiceLineType.PHARMACY,
+            referenceType: InvoiceReferenceType.PHARMACY_TRANSACTION,
+            referenceId: transaction.id,
+            description: `Pharmacy sale (${medicine.name}) for transaction ${transaction.id}`,
+            quantity: dto.quantity,
+            unitPrice: dto.quantity > 0 ? Number((dto.amount / dto.quantity).toFixed(2)) : 0,
+          },
+          actor,
+        );
+      } catch (error) {
+        await this.safeAudit({
+          userId: actor?.userId,
+          action: 'BILLING_APPEND_FAILED',
+          module: 'PHARMACY',
+          entityId: transaction.id,
+          details: {
+            message: error instanceof Error ? error.message : 'Unknown billing append error',
+          },
+        });
+      }
     }
 
-    await this.prisma.auditLog.create({
-      data: {
-        userId: actor?.userId,
-        action: 'CREATE_TRANSACTION',
-        module: 'PHARMACY',
-        entityId: transaction.id,
-        details: { type: dto.type, quantity: dto.quantity },
-      },
+    await this.safeAudit({
+      userId: actor?.userId,
+      action: 'CREATE_TRANSACTION',
+      module: 'PHARMACY',
+      entityId: transaction.id,
+      details: { type: dto.type, quantity: dto.quantity },
     });
     return transaction;
   }
@@ -110,7 +137,7 @@ export class PharmacyService {
 
     const amount = Number((medicine.unitPrice * dto.quantity).toFixed(2));
 
-    const [transaction, , invoice] = await this.prisma.$transaction([
+    const [transaction] = await this.prisma.$transaction([
       this.prisma.pharmacyTransaction.create({
         data: {
           medicineId: dto.medicineId,
@@ -124,64 +151,50 @@ export class PharmacyService {
         where: { id: dto.medicineId },
         data: { stock: medicine.stock - dto.quantity },
       }),
-      this.prisma.invoice.create({
-        data: {
-          patientId: dto.patientId,
-          doctorId,
-          type: InvoiceType.PHARMACY,
-          description: `Pharmacy prescription: ${medicine.name} x ${dto.quantity}${dto.notes ? ` | Notes: ${dto.notes}` : ''}`,
-          amount,
-          paidAmount: 0,
-          status: InvoiceStatus.UNPAID,
-        },
-      }),
     ]);
 
-    await this.prisma.auditLog.create({
-      data: {
+    let invoice = null;
+    try {
+      invoice = await this.billingService.appendAutoLine(
+        {
+          patientId: dto.patientId,
+          doctorId,
+          lineType: InvoiceLineType.PHARMACY,
+          referenceType: InvoiceReferenceType.PHARMACY_TRANSACTION,
+          referenceId: transaction.id,
+          description: `Pharmacy prescription: ${medicine.name} x ${dto.quantity}${dto.notes ? ` | Notes: ${dto.notes}` : ''}`,
+          quantity: dto.quantity,
+          unitPrice: medicine.unitPrice,
+        },
+        actor,
+      );
+    } catch (error) {
+      await this.safeAudit({
         userId: actor.userId,
-        action: 'PRESCRIBE_MEDICINE',
+        action: 'BILLING_APPEND_FAILED',
         module: 'PHARMACY',
         entityId: transaction.id,
         details: {
-          patientId: dto.patientId,
-          medicineId: dto.medicineId,
-          quantity: dto.quantity,
-          amount,
-          invoiceId: invoice.id,
+          message: error instanceof Error ? error.message : 'Unknown billing append error',
         },
+      });
+    }
+
+    await this.safeAudit({
+      userId: actor.userId,
+      action: 'PRESCRIBE_MEDICINE',
+      module: 'PHARMACY',
+      entityId: transaction.id,
+      details: {
+        patientId: dto.patientId,
+        medicineId: dto.medicineId,
+        quantity: dto.quantity,
+        amount,
+        invoiceId: invoice?.id,
       },
     });
 
     return { transaction, invoice };
-  }
-
-  private async createPharmacyInvoiceIfMissing(
-    transactionId: string,
-    patientId: string,
-    amount: number,
-    medicineName: string,
-  ) {
-    const description = `Pharmacy sale (${medicineName}) for transaction ${transactionId}`;
-    const existing = await this.prisma.invoice.findFirst({
-      where: {
-        patientId,
-        type: InvoiceType.PHARMACY,
-        description,
-      },
-    });
-    if (existing) return existing;
-
-    return this.prisma.invoice.create({
-      data: {
-        patientId,
-        type: InvoiceType.PHARMACY,
-        description,
-        amount,
-        paidAmount: 0,
-        status: InvoiceStatus.UNPAID,
-      },
-    });
   }
 
   findTransactions(page = 1, limit = 10) {

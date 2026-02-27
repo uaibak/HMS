@@ -47,6 +47,25 @@ enum InvoiceStatus {
   PAID
 }
 
+enum EncounterStatus {
+  OPEN
+  CLOSED
+}
+
+enum InvoiceLineType {
+  OPD
+  LAB
+  PHARMACY
+  OTHER
+}
+
+enum InvoiceReferenceType {
+  APPOINTMENT
+  LAB_ORDER
+  PHARMACY_TRANSACTION
+  MANUAL
+}
+
 model Role {
   id          String   @id @default(uuid())
   name        RoleName @unique
@@ -84,6 +103,7 @@ model Doctor {
   patients       Patient[]
   appointments   Appointment[]
   invoices       Invoice[]
+  encounters     Encounter[]
   user           User?         @relation(fields: [userId], references: [id])
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -104,6 +124,7 @@ model Patient {
   appointments         Appointment[]
   labOrders            LabOrder[]
   invoices             Invoice[]
+  encounters           Encounter[]
   pharmacyTransactions PharmacyTransaction[]
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
@@ -119,6 +140,7 @@ model Appointment {
   status          AppointmentStatus @default(BOOKED)
   patient         Patient           @relation(fields: [patientId], references: [id])
   doctor          Doctor            @relation(fields: [doctorId], references: [id])
+  encounters      Encounter[]
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 }
@@ -177,16 +199,56 @@ model Invoice {
   id          String        @id @default(uuid())
   patientId   String
   doctorId    String?
+  encounterId String?       @unique
   type        InvoiceType
   description String?
+  subtotal    Float         @default(0)
+  discount    Float         @default(0)
+  tax         Float         @default(0)
+  grandTotal  Float         @default(0)
   amount      Float
   paidAmount  Float         @default(0)
   status      InvoiceStatus @default(UNPAID)
   dueDate     DateTime?
   patient     Patient       @relation(fields: [patientId], references: [id])
   doctor      Doctor?       @relation(fields: [doctorId], references: [id])
+  encounter   Encounter?    @relation(fields: [encounterId], references: [id])
+  lines       InvoiceLine[]
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
+}
+
+model Encounter {
+  id            String          @id @default(uuid())
+  patientId     String
+  doctorId      String?
+  appointmentId String?
+  status        EncounterStatus @default(OPEN)
+  openedAt      DateTime        @default(now())
+  closedAt      DateTime?
+  patient       Patient         @relation(fields: [patientId], references: [id])
+  doctor        Doctor?         @relation(fields: [doctorId], references: [id])
+  appointment   Appointment?    @relation(fields: [appointmentId], references: [id])
+  invoice       Invoice?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model InvoiceLine {
+  id            String               @id @default(uuid())
+  invoiceId     String
+  lineType      InvoiceLineType
+  referenceType InvoiceReferenceType
+  referenceId   String
+  description   String
+  quantity      Int                  @default(1)
+  unitPrice     Float
+  lineTotal     Float
+  invoice       Invoice              @relation(fields: [invoiceId], references: [id])
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@unique([invoiceId, referenceType, referenceId])
 }
 
 model Setting {

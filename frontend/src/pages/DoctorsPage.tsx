@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Space, Tag, message } from 'antd';
+import { App, Button, Form, Input, Modal, Space, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import { createDoctor, deleteDoctor, getDoctors, updateDoctor } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
@@ -9,8 +9,11 @@ import { DataTableWrapper } from '../components/common/DataTableWrapper';
 import { ConfirmActionButton } from '../components/common/ConfirmActionButton';
 
 export function DoctorsPage() {
+  const { message } = App.useApp();
   const { user } = useAuth();
   const [rows, setRows] = useState<any[]>([]);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
@@ -20,32 +23,45 @@ export function DoctorsPage() {
   const canManageDoctors = can(user?.role, 'doctors', 'create');
 
   async function load(p = page) {
-    const res = await getDoctors(p, 10);
-    setRows(res.data);
-    setTotal(res.total);
-    setPage(p);
+    try {
+      setTableLoading(true);
+      const res = await getDoctors(p, 10);
+      setRows(res.data);
+      setTotal(res.total);
+      setPage(p);
+    } catch {
+      message.error('Unable to load doctors');
+    } finally {
+      setTableLoading(false);
+    }
   }
 
   useEffect(() => { load(1); }, []);
 
   async function submit() {
-    const values = await form.validateFields();
-    const payload = {
-      ...values,
-      availability: { slots: [{ day: 'Monday', from: values.from || '09:00', to: values.to || '13:00' }] },
-    };
-    delete payload.from;
-    delete payload.to;
-    setSaving(true);
+    let shouldReload = false;
     try {
+      const values = await form.validateFields();
+      const payload = {
+        ...values,
+        availability: { slots: [{ day: 'Monday', from: values.from || '09:00', to: values.to || '13:00' }] },
+      };
+      delete payload.from;
+      delete payload.to;
+      setSaving(true);
       if (editing) await updateDoctor(editing.id, payload);
       else await createDoctor(payload);
+      shouldReload = true;
       message.success('Doctor profile saved');
       setOpen(false);
       setEditing(null);
       form.resetFields();
-      await load(page);
+    } catch {
+      message.error('Unable to save doctor');
     } finally {
+      if (shouldReload) {
+        await load(page);
+      }
       setSaving(false);
     }
   }
@@ -67,6 +83,7 @@ export function DoctorsPage() {
       />
       <DataTableWrapper
         rowKey="id"
+        loading={tableLoading}
         dataSource={rows}
         pagination={{ current: page, total, onChange: load }}
         columns={[
@@ -82,11 +99,19 @@ export function DoctorsPage() {
                   <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue(r); }}>Edit</Button>
                   <ConfirmActionButton
                     danger
+                    loading={deletingId === r.id}
                     title="Delete this doctor?"
                     onConfirm={async () => {
-                      await deleteDoctor(r.id);
-                      message.success('Doctor removed');
-                      await load(page);
+                      try {
+                        setDeletingId(r.id);
+                        await deleteDoctor(r.id);
+                        message.success('Doctor removed');
+                      } catch {
+                        message.error('Unable to remove doctor');
+                      } finally {
+                        await load(page);
+                        setDeletingId(null);
+                      }
                     }}
                   >
                     Delete

@@ -19,7 +19,7 @@ export function StatCard({
   };
 
   return (
-    <Card className="surface-card" bodyStyle={{ padding: 18 }}>
+    <Card className="surface-card" styles={{ body: { padding: 18 } }}>
       <Space direction="vertical" size={6}>
         <Typography.Text className="kpi-label">{label}</Typography.Text>
         <Typography.Text className="kpi-value">

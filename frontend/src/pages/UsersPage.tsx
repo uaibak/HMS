@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Select, Space, message } from 'antd';
+import { App, Button, Form, Input, Modal, Select, Space } from 'antd';
 import { useEffect, useState } from 'react';
 import { createUser, deleteUser, getUsers, updateUser } from '../services/api';
 import { PageHeader } from '../components/common/PageHeader';
@@ -7,7 +7,10 @@ import { SearchFilterBar } from '../components/common/SearchFilterBar';
 import { ConfirmActionButton } from '../components/common/ConfirmActionButton';
 
 export function UsersPage() {
+  const { message } = App.useApp();
   const [rows, setRows] = useState<any[]>([]);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [open, setOpen] = useState(false);
@@ -16,10 +19,17 @@ export function UsersPage() {
   const [form] = Form.useForm();
 
   async function load(p = page) {
-    const res = await getUsers(p, 10);
-    setRows(res.data);
-    setTotal(res.total);
-    setPage(p);
+    try {
+      setTableLoading(true);
+      const res = await getUsers(p, 10);
+      setRows(res.data);
+      setTotal(res.total);
+      setPage(p);
+    } catch {
+      message.error('Unable to load users');
+    } finally {
+      setTableLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -27,17 +37,23 @@ export function UsersPage() {
   }, []);
 
   async function submit() {
-    const values = await form.validateFields();
-    setSaving(true);
+    let shouldReload = false;
     try {
+      const values = await form.validateFields();
+      setSaving(true);
       if (editing) await updateUser(editing.id, values);
       else await createUser(values);
+      shouldReload = true;
       message.success('User saved successfully');
       form.resetFields();
       setOpen(false);
       setEditing(null);
-      await load(page);
+    } catch {
+      message.error('Unable to save user');
     } finally {
+      if (shouldReload) {
+        await load(page);
+      }
       setSaving(false);
     }
   }
@@ -51,6 +67,7 @@ export function UsersPage() {
       />
       <DataTableWrapper
         rowKey="id"
+        loading={tableLoading}
         dataSource={rows}
         pagination={{ current: page, total, onChange: load }}
         columns={[
@@ -64,11 +81,19 @@ export function UsersPage() {
                 <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue({ ...r, role: r.role?.name, password: '' }); }}>Edit</Button>
                 <ConfirmActionButton
                   danger
+                  loading={deletingId === r.id}
                   title="Delete this user?"
                   onConfirm={async () => {
-                    await deleteUser(r.id);
-                    message.success('User removed');
-                    await load(page);
+                    try {
+                      setDeletingId(r.id);
+                      await deleteUser(r.id);
+                      message.success('User removed');
+                    } catch {
+                      message.error('Unable to remove user');
+                    } finally {
+                      await load(page);
+                      setDeletingId(null);
+                    }
                   }}
                 >
                   Delete

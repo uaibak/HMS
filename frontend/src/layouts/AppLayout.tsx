@@ -9,9 +9,10 @@ import {
   SettingOutlined,
   TeamOutlined,
   UserOutlined,
+  SyncOutlined,
 } from '@ant-design/icons';
-import { Avatar, Button, Drawer, Grid, Layout, Menu, Space, Tag, Typography } from 'antd';
-import { useMemo, useState } from 'react';
+import { Avatar, Badge, Button, Drawer, Grid, Layout, Menu, Space, Tag, Typography } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
@@ -19,7 +20,14 @@ import { can } from '../utils/permissions';
 const { Header, Sider, Content } = Layout;
 const { useBreakpoint } = Grid;
 
-const navItems = [
+type NavItem = {
+  key: string;
+  label: string;
+  icon: JSX.Element;
+  isAllowed: (role?: string) => boolean;
+};
+
+const navItems: NavItem[] = [
   { key: '/dashboard', label: 'Dashboard', icon: <DashboardOutlined />, isAllowed: (role?: string) => !!role },
   { key: '/users', label: 'Users', icon: <TeamOutlined />, isAllowed: (role?: string) => can(role, 'users', 'view') },
   { key: '/patients', label: 'Patients', icon: <UserOutlined />, isAllowed: (role?: string) => can(role, 'patients', 'view') },
@@ -35,14 +43,26 @@ const navItems = [
 export function AppLayout() {
   const { md } = useBreakpoint();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [networkPending, setNetworkPending] = useState(0);
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
   const visibleItems = useMemo(
-    () => navItems.filter((item) => item.isAllowed(user?.role)),
+    () => navItems
+      .filter((item) => item.isAllowed(user?.role))
+      .map(({ key, label, icon }) => ({ key, label, icon })),
     [user?.role],
   );
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const pending = (event as CustomEvent<{ pending: number }>).detail?.pending ?? 0;
+      setNetworkPending(pending);
+    };
+    window.addEventListener('hms:network', handler as EventListener);
+    return () => window.removeEventListener('hms:network', handler as EventListener);
+  }, []);
 
   const menu = (
     <Menu
@@ -76,8 +96,10 @@ export function AppLayout() {
           width={250}
           open={drawerOpen}
           onClose={() => setDrawerOpen(false)}
-          bodyStyle={{ background: '#0f172a', padding: 0 }}
-          headerStyle={{ background: '#0f172a', color: '#f8fafc' }}
+          styles={{
+            body: { background: '#0f172a', padding: 0 },
+            header: { background: '#0f172a', color: '#f8fafc' },
+          }}
           title={<span style={{ color: '#f8fafc' }}>HMS Console</span>}
         >
           {menu}
@@ -104,6 +126,9 @@ export function AppLayout() {
             </Typography.Text>
           </Space>
           <Space size={12}>
+            <Badge dot={networkPending > 0} offset={[-2, 2]}>
+              <SyncOutlined spin={networkPending > 0} style={{ fontSize: 16, color: '#0f766e' }} />
+            </Badge>
             <Avatar style={{ backgroundColor: '#0f766e' }}>{user?.firstName?.[0] || 'U'}</Avatar>
             <Space direction="vertical" size={0} style={{ lineHeight: 1 }}>
               <Typography.Text style={{ fontWeight: 600 }}>

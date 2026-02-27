@@ -1,4 +1,4 @@
-import { Button, DatePicker, Form, Input, Modal, Select, Space, Tag, message } from 'antd';
+import { App, Button, DatePicker, Form, Input, Modal, Select, Space, Tag } from 'antd';
 import { useEffect, useState } from 'react';
 import dayjs from 'dayjs';
 import { createPatient, deletePatient, getDoctors, getPatients, updatePatient } from '../services/api';
@@ -10,8 +10,11 @@ import { DataTableWrapper } from '../components/common/DataTableWrapper';
 import { ConfirmActionButton } from '../components/common/ConfirmActionButton';
 
 export function PatientsPage() {
+  const { message } = App.useApp();
   const { user } = useAuth();
   const [rows, setRows] = useState<any[]>([]);
+  const [tableLoading, setTableLoading] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -23,10 +26,17 @@ export function PatientsPage() {
   const canManagePatients = can(user?.role, 'patients', 'create');
 
   async function load(p = page, s = search) {
-    const res = await getPatients({ page: p, limit: 10, search: s });
-    setRows(res.data);
-    setTotal(res.total);
-    setPage(p);
+    try {
+      setTableLoading(true);
+      const res = await getPatients({ page: p, limit: 10, search: s });
+      setRows(res.data);
+      setTotal(res.total);
+      setPage(p);
+    } catch {
+      message.error('Unable to load patients');
+    } finally {
+      setTableLoading(false);
+    }
   }
 
   useEffect(() => { load(1); }, []);
@@ -35,18 +45,24 @@ export function PatientsPage() {
   }, []);
 
   async function submit() {
-    const values = await form.validateFields();
-    const payload = { ...values, dob: values.dob.format('YYYY-MM-DD') };
-    setSaving(true);
+    let shouldReload = false;
     try {
+      const values = await form.validateFields();
+      const payload = { ...values, dob: values.dob.format('YYYY-MM-DD') };
+      setSaving(true);
       if (editing) await updatePatient(editing.id, payload);
       else await createPatient(payload);
+      shouldReload = true;
       message.success('Patient record saved');
       setOpen(false);
       setEditing(null);
       form.resetFields();
-      await load(page);
+    } catch {
+      message.error('Unable to save patient');
     } finally {
+      if (shouldReload) {
+        await load(page);
+      }
       setSaving(false);
     }
   }
@@ -65,6 +81,7 @@ export function PatientsPage() {
       />
       <DataTableWrapper
         rowKey="id"
+        loading={tableLoading}
         dataSource={rows}
         pagination={{ current: page, total, onChange: (nextPage) => load(nextPage, search) }}
         columns={[
@@ -80,11 +97,19 @@ export function PatientsPage() {
                   <Button onClick={() => { setEditing(r); setOpen(true); form.setFieldsValue({ ...r, dob: dayjs(r.dob) }); }}>Edit</Button>
                   <ConfirmActionButton
                     danger
+                    loading={deletingId === r.id}
                     title="Delete this patient?"
                     onConfirm={async () => {
-                      await deletePatient(r.id);
-                      message.success('Patient removed');
-                      await load(page);
+                      try {
+                        setDeletingId(r.id);
+                        await deletePatient(r.id);
+                        message.success('Patient removed');
+                      } catch {
+                        message.error('Unable to remove patient');
+                      } finally {
+                        await load(page);
+                        setDeletingId(null);
+                      }
                     }}
                   >
                     Delete

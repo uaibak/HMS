@@ -1,4 +1,4 @@
-import { Alert, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Tabs, message } from 'antd';
+import { Alert, App, Button, DatePicker, Form, Input, InputNumber, Modal, Select, Space, Tabs } from 'antd';
 import { useEffect, useMemo, useState } from 'react';
 import {
   createMedicine,
@@ -9,6 +9,8 @@ import {
 } from '../services/api';
 import { useAuth } from '../hooks/useAuth';
 import { can } from '../utils/permissions';
+import { formatLocalDateTime } from '../utils/dateTime';
+import { formatShortId } from '../utils/idFormat';
 import { PageHeader } from '../components/common/PageHeader';
 import { DataTableWrapper } from '../components/common/DataTableWrapper';
 
@@ -22,10 +24,15 @@ type MedicineRow = {
 };
 
 export function PharmacyPage() {
+  const { message } = App.useApp();
   const { user } = useAuth();
   const [medicines, setMedicines] = useState<MedicineRow[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [patients, setPatients] = useState<any[]>([]);
+  const [inventoryLoading, setInventoryLoading] = useState(false);
+  const [transactionsLoading, setTransactionsLoading] = useState(false);
+  const [savingInventory, setSavingInventory] = useState(false);
+  const [savingPrescription, setSavingPrescription] = useState(false);
 
   const [inventoryModalOpen, setInventoryModalOpen] = useState(false);
   const [prescriptionModalOpen, setPrescriptionModalOpen] = useState(false);
@@ -38,15 +45,24 @@ export function PharmacyPage() {
   const lowStock = medicines.filter((m) => m.stock < 20);
 
   async function load() {
-    const [medsRes, txRes, patientsRes] = await Promise.all([
-      getMedicines(1, 100),
-      getPharmacyTransactions(1, 100),
-      getPatients({ page: 1, limit: 100 }),
-    ]);
+    try {
+      setInventoryLoading(true);
+      setTransactionsLoading(true);
+      const [medsRes, txRes, patientsRes] = await Promise.all([
+        getMedicines(1, 100),
+        getPharmacyTransactions(1, 100),
+        getPatients({ page: 1, limit: 100 }),
+      ]);
 
-    setMedicines(medsRes.data);
-    setTransactions(txRes);
-    setPatients(patientsRes.data);
+      setMedicines(medsRes.data);
+      setTransactions(txRes);
+      setPatients(patientsRes.data);
+    } catch {
+      message.error('Unable to load pharmacy data');
+    } finally {
+      setInventoryLoading(false);
+      setTransactionsLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -54,37 +70,51 @@ export function PharmacyPage() {
   }, []);
 
   async function submitInventory() {
-    const values = await inventoryForm.validateFields();
-    await createMedicine({
-      ...values,
-      expiryDate: values.expiryDate.format('YYYY-MM-DD'),
-    });
-    message.success('Medicine added to inventory');
-    setInventoryModalOpen(false);
-    inventoryForm.resetFields();
-    await load();
+    try {
+      setSavingInventory(true);
+      const values = await inventoryForm.validateFields();
+      await createMedicine({
+        ...values,
+        expiryDate: values.expiryDate.format('YYYY-MM-DD'),
+      });
+      await load();
+      message.success('Medicine added to inventory');
+      setInventoryModalOpen(false);
+      inventoryForm.resetFields();
+    } catch {
+      message.error('Unable to add medicine');
+    } finally {
+      setSavingInventory(false);
+    }
   }
 
   async function submitPrescription() {
-    const values = await prescriptionForm.validateFields();
-    const medicine = medicines.find((m) => m.id === values.medicineId);
+    try {
+      setSavingPrescription(true);
+      const values = await prescriptionForm.validateFields();
+      const medicine = medicines.find((m) => m.id === values.medicineId);
 
-    if (!medicine) {
-      message.error('Selected medicine was not found');
-      return;
+      if (!medicine) {
+        message.error('Selected medicine was not found');
+        return;
+      }
+
+      if (medicine.stock < values.quantity) {
+        message.error('Insufficient stock for selected quantity');
+        return;
+      }
+
+      await prescribeMedicine(values);
+      await load();
+      // Backend auto-creates PHARMACY invoice and sale transaction for patient.
+      message.success('Medicine suggested successfully. Invoice entry added for patient billing.');
+      setPrescriptionModalOpen(false);
+      prescriptionForm.resetFields();
+    } catch {
+      message.error('Unable to suggest medicine');
+    } finally {
+      setSavingPrescription(false);
     }
-
-    if (medicine.stock < values.quantity) {
-      message.error('Insufficient stock for selected quantity');
-      return;
-    }
-
-    await prescribeMedicine(values);
-    // Backend auto-creates PHARMACY invoice and sale transaction for patient.
-    message.success('Medicine suggested successfully. Invoice entry added for patient billing.');
-    setPrescriptionModalOpen(false);
-    prescriptionForm.resetFields();
-    await load();
   }
 
   const selectedMedicineId = Form.useWatch('medicineId', prescriptionForm);
@@ -130,11 +160,12 @@ export function PharmacyPage() {
             children: (
               <DataTableWrapper
                 rowKey="id"
+                loading={inventoryLoading}
                 dataSource={medicines}
                 columns={[
                   { title: 'Name', dataIndex: 'name' },
                   { title: 'Batch', dataIndex: 'batchNo' },
-                  { title: 'Expiry', dataIndex: 'expiryDate' },
+                  { title: 'Expiry', render: (_, r) => formatLocalDateTime(r.expiryDate) },
                   { title: 'Stock', dataIndex: 'stock' },
                   { title: 'Unit Price', dataIndex: 'unitPrice' },
                 ]}
@@ -147,6 +178,7 @@ export function PharmacyPage() {
             children: (
               <DataTableWrapper
                 rowKey="id"
+                loading={transactionsLoading}
                 dataSource={transactions}
                 columns={[
                   { title: 'Medicine', render: (_, r) => r.medicine?.name },
@@ -154,7 +186,7 @@ export function PharmacyPage() {
                   { title: 'Type', dataIndex: 'type' },
                   { title: 'Qty', dataIndex: 'quantity' },
                   { title: 'Amount', dataIndex: 'amount' },
-                  { title: 'Date', dataIndex: 'transactionDate' },
+                  { title: 'Date', render: (_, r) => formatLocalDateTime(r.transactionDate) },
                 ]}
               />
             ),
@@ -167,6 +199,7 @@ export function PharmacyPage() {
         title="Add Medicine"
         onCancel={() => setInventoryModalOpen(false)}
         onOk={submitInventory}
+        okButtonProps={{ loading: savingInventory }}
       >
         <Form form={inventoryForm} layout="vertical">
           <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input /></Form.Item>
@@ -183,6 +216,7 @@ export function PharmacyPage() {
         title="Suggest Medicine To Patient"
         onCancel={() => setPrescriptionModalOpen(false)}
         onOk={submitPrescription}
+        okButtonProps={{ loading: savingPrescription }}
       >
         <Form form={prescriptionForm} layout="vertical">
           <Form.Item name="patientId" label="Patient" rules={[{ required: true, message: 'Please select patient' }]}>
@@ -190,7 +224,10 @@ export function PharmacyPage() {
               showSearch
               optionFilterProp="label"
               placeholder="Search patient by name/CNIC"
-              options={patients.map((p) => ({ value: p.id, label: `${p.firstName} ${p.lastName} (${p.cnic})` }))}
+              options={patients.map((p) => ({
+                value: p.id,
+                label: `${formatShortId(p.id, 'PAT')} | ${p.firstName} ${p.lastName} (${p.cnic})`,
+              }))}
             />
           </Form.Item>
 

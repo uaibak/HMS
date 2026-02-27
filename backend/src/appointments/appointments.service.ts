@@ -1,8 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { AppointmentStatus, InvoiceStatus, InvoiceType, Prisma, RoleName } from '@prisma/client';
+import { AppointmentStatus, InvoiceLineType, InvoiceReferenceType, Prisma, RoleName } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { BillingService } from '../billing/billing.service';
 
 type Actor = {
   userId: string;
@@ -11,8 +12,52 @@ type Actor = {
 
 @Injectable()
 export class AppointmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly billingService: BillingService,
+  ) {}
   private static readonly DEFAULT_OPD_FEE = 1500;
+
+  private async safeAudit(data: Prisma.AuditLogUncheckedCreateInput) {
+    try {
+      await this.prisma.auditLog.create({ data });
+    } catch {
+      // Audit logging must not break primary appointment flows.
+    }
+  }
+
+  /**
+   * Billing is a side-effect of completion; appointment completion should not fail
+   * if line aggregation has a transient issue.
+   */
+  private async tryAppendCompletionLine(appointmentId: string, patientId: string, doctorId: string, actor: Actor) {
+    try {
+      await this.billingService.appendAutoLine(
+        {
+          patientId,
+          doctorId,
+          appointmentId,
+          lineType: InvoiceLineType.OPD,
+          referenceType: InvoiceReferenceType.APPOINTMENT,
+          referenceId: appointmentId,
+          description: `OPD consultation for appointment ${appointmentId}`,
+          quantity: 1,
+          unitPrice: AppointmentsService.DEFAULT_OPD_FEE,
+        },
+        actor,
+      );
+    } catch (error) {
+      await this.safeAudit({
+        userId: actor.userId,
+        action: 'BILLING_APPEND_FAILED',
+        module: 'APPOINTMENTS',
+        entityId: appointmentId,
+        details: {
+          message: error instanceof Error ? error.message : 'Unknown billing append error',
+        },
+      });
+    }
+  }
 
   async create(dto: CreateAppointmentDto, actor: Actor) {
     const appointment = await this.prisma.appointment.create({
@@ -26,14 +71,12 @@ export class AppointmentsService {
         status: AppointmentStatus.BOOKED,
       },
     });
-    await this.prisma.auditLog.create({
-      data: {
-        userId: actor.userId,
-        action: 'CREATE',
-        module: 'APPOINTMENTS',
-        entityId: appointment.id,
-        details: { patientId: dto.patientId, doctorId: dto.doctorId },
-      },
+    await this.safeAudit({
+      userId: actor.userId,
+      action: 'CREATE',
+      module: 'APPOINTMENTS',
+      entityId: appointment.id,
+      details: { patientId: dto.patientId, doctorId: dto.doctorId },
     });
     return appointment;
   }
@@ -99,17 +142,20 @@ export class AppointmentsService {
       });
 
       if (updatedByDoctor.status === AppointmentStatus.COMPLETED) {
-        await this.createOpdInvoiceIfMissing(updatedByDoctor.id, updatedByDoctor.patientId, updatedByDoctor.doctorId);
+        await this.tryAppendCompletionLine(
+          updatedByDoctor.id,
+          updatedByDoctor.patientId,
+          updatedByDoctor.doctorId,
+          actor,
+        );
       }
 
-      await this.prisma.auditLog.create({
-        data: {
-          userId: actor.userId,
-          action: isDoctorComplete ? 'COMPLETE' : 'RESCHEDULE',
-          module: 'APPOINTMENTS',
-          entityId: updatedByDoctor.id,
-          details: { appointmentDate: dto.appointmentDate, status: updatedByDoctor.status },
-        },
+      await this.safeAudit({
+        userId: actor.userId,
+        action: isDoctorComplete ? 'COMPLETE' : 'RESCHEDULE',
+        module: 'APPOINTMENTS',
+        entityId: updatedByDoctor.id,
+        details: { appointmentDate: dto.appointmentDate, status: updatedByDoctor.status },
       });
       return updatedByDoctor;
     }
@@ -138,43 +184,16 @@ export class AppointmentsService {
       });
     }
     if (updated.status === AppointmentStatus.COMPLETED) {
-      await this.createOpdInvoiceIfMissing(updated.id, updated.patientId, updated.doctorId);
+      await this.tryAppendCompletionLine(updated.id, updated.patientId, updated.doctorId, actor);
     }
-    await this.prisma.auditLog.create({
-      data: {
-        userId: actor.userId,
-        action: 'UPDATE',
-        module: 'APPOINTMENTS',
-        entityId: updated.id,
-        details: dto as unknown as Prisma.InputJsonValue,
-      },
+    await this.safeAudit({
+      userId: actor.userId,
+      action: 'UPDATE',
+      module: 'APPOINTMENTS',
+      entityId: updated.id,
+      details: dto as unknown as Prisma.InputJsonValue,
     });
     return updated;
-  }
-
-  private async createOpdInvoiceIfMissing(appointmentId: string, patientId: string, doctorId: string) {
-    const description = `OPD consultation for appointment ${appointmentId}`;
-    const existing = await this.prisma.invoice.findFirst({
-      where: {
-        patientId,
-        doctorId,
-        type: InvoiceType.OPD,
-        description,
-      },
-    });
-    if (existing) return existing;
-
-    return this.prisma.invoice.create({
-      data: {
-        patientId,
-        doctorId,
-        type: InvoiceType.OPD,
-        description,
-        amount: AppointmentsService.DEFAULT_OPD_FEE,
-        paidAmount: 0,
-        status: InvoiceStatus.UNPAID,
-      },
-    });
   }
 
   cancel(id: string, actor: Actor) {
@@ -188,13 +207,11 @@ export class AppointmentsService {
       throw new BadRequestException('Completed appointments cannot be deleted');
     }
     const deleted = await this.prisma.appointment.delete({ where: { id } });
-    await this.prisma.auditLog.create({
-      data: {
-        userId: actor.userId,
-        action: 'DELETE',
-        module: 'APPOINTMENTS',
-        entityId: deleted.id,
-      },
+    await this.safeAudit({
+      userId: actor.userId,
+      action: 'DELETE',
+      module: 'APPOINTMENTS',
+      entityId: deleted.id,
     });
     return deleted;
   }

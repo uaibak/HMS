@@ -33,6 +33,33 @@ export class BillingController {
     return this.billingService.findAll(query.page, query.limit, req.user);
   }
 
+  @Get('encounters')
+  @Roles(RoleName.ADMIN, RoleName.RECEPTIONIST, RoleName.DOCTOR)
+  listEncounters(
+    @Query() query: PaginationQueryDto,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.billingService.listEncounters(query.page, query.limit, req.user);
+  }
+
+  @Get('encounters/:id')
+  @Roles(RoleName.ADMIN, RoleName.RECEPTIONIST, RoleName.DOCTOR)
+  getEncounter(
+    @Param('id') id: string,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.billingService.getEncounterById(id, req.user);
+  }
+
+  @Patch('encounters/:id/close')
+  @Roles(RoleName.ADMIN, RoleName.RECEPTIONIST)
+  closeEncounter(
+    @Param('id') id: string,
+    @Req() req: Request & { user: { userId: string; role: RoleName } },
+  ) {
+    return this.billingService.closeEncounter(id, req.user);
+  }
+
   @Patch('invoices/:id')
   @Roles(RoleName.ADMIN, RoleName.RECEPTIONIST)
   update(
